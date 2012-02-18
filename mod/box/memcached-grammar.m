@@ -38,6 +38,11 @@ static const int memcached_en_main = 1;
 #line 30 "mod/box/memcached-grammar.rl"
 
 
+#if TARGET_OS_DARWIN
+void * memmem(const void *haystack, size_t hlen,
+	      const void *needle, size_t nlen);
+#endif
+
 static int __attribute__((noinline))
 memcached_dispatch()
 {
@@ -64,12 +69,12 @@ memcached_dispatch()
 	say_debug("memcached_dispatch '%.*s'", MIN((int)(pe - p), 40) , p);
 
 	
-#line 68 "mod/box/memcached-grammar.m"
+#line 73 "mod/box/memcached-grammar.m"
 	{
 	cs = memcached_start;
 	}
 
-#line 73 "mod/box/memcached-grammar.m"
+#line 78 "mod/box/memcached-grammar.m"
 	{
 	if ( p == pe )
 		goto _test_eof;
@@ -127,7 +132,7 @@ case 5:
 		goto st0;
 	goto tr15;
 tr15:
-#line 227 "mod/box/memcached-grammar.rl"
+#line 232 "mod/box/memcached-grammar.rl"
 	{
 			fstart = p;
 			for (; p < pe && *p != ' ' && *p != '\r' && *p != '\n'; p++);
@@ -144,7 +149,7 @@ st6:
 	if ( ++p == pe )
 		goto _test_eof6;
 case 6:
-#line 148 "mod/box/memcached-grammar.m"
+#line 153 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st7;
 	goto st0;
@@ -158,49 +163,49 @@ case 7:
 		goto tr17;
 	goto st0;
 tr17:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st8;
 st8:
 	if ( ++p == pe )
 		goto _test_eof8;
 case 8:
-#line 169 "mod/box/memcached-grammar.m"
+#line 174 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto tr18;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto st8;
 	goto st0;
 tr18:
-#line 250 "mod/box/memcached-grammar.rl"
+#line 255 "mod/box/memcached-grammar.rl"
 	{flags = natoq(fstart, p);}
 	goto st9;
 st9:
 	if ( ++p == pe )
 		goto _test_eof9;
 case 9:
-#line 183 "mod/box/memcached-grammar.m"
+#line 188 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st9;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto tr21;
 	goto st0;
 tr21:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st10;
 st10:
 	if ( ++p == pe )
 		goto _test_eof10;
 case 10:
-#line 197 "mod/box/memcached-grammar.m"
+#line 202 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto tr22;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto st10;
 	goto st0;
 tr22:
-#line 243 "mod/box/memcached-grammar.rl"
+#line 248 "mod/box/memcached-grammar.rl"
 	{
 			exptime = natoq(fstart, p);
 			if (exptime > 0 && exptime <= 60*60*24*30)
@@ -211,21 +216,21 @@ st11:
 	if ( ++p == pe )
 		goto _test_eof11;
 case 11:
-#line 215 "mod/box/memcached-grammar.m"
+#line 220 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st11;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto tr25;
 	goto st0;
 tr25:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st12;
 st12:
 	if ( ++p == pe )
 		goto _test_eof12;
 case 12:
-#line 229 "mod/box/memcached-grammar.m"
+#line 234 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr26;
 		case 13: goto tr27;
@@ -235,11 +240,11 @@ case 12:
 		goto st12;
 	goto st0;
 tr26:
-#line 251 "mod/box/memcached-grammar.rl"
-	{bytes = natoq(fstart, p);}
-#line 283 "mod/box/memcached-grammar.rl"
-	{ p++; }
 #line 256 "mod/box/memcached-grammar.rl"
+	{bytes = natoq(fstart, p);}
+#line 288 "mod/box/memcached-grammar.rl"
+	{ p++; }
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -260,13 +265,13 @@ tr26:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 63 "mod/box/memcached-grammar.rl"
+#line 68 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
@@ -277,9 +282,9 @@ tr26:
 		}
 	goto st197;
 tr30:
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 256 "mod/box/memcached-grammar.rl"
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -300,13 +305,13 @@ tr30:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 63 "mod/box/memcached-grammar.rl"
+#line 68 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
@@ -317,11 +322,11 @@ tr30:
 		}
 	goto st197;
 tr39:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 256 "mod/box/memcached-grammar.rl"
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -342,13 +347,13 @@ tr39:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 63 "mod/box/memcached-grammar.rl"
+#line 68 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
@@ -359,11 +364,11 @@ tr39:
 		}
 	goto st197;
 tr58:
-#line 251 "mod/box/memcached-grammar.rl"
-	{bytes = natoq(fstart, p);}
-#line 283 "mod/box/memcached-grammar.rl"
-	{ p++; }
 #line 256 "mod/box/memcached-grammar.rl"
+	{bytes = natoq(fstart, p);}
+#line 288 "mod/box/memcached-grammar.rl"
+	{ p++; }
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -384,13 +389,13 @@ tr58:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 92 "mod/box/memcached-grammar.rl"
+#line 97 "mod/box/memcached-grammar.rl"
 	{
 			struct tbuf *b;
 			void *value;
@@ -419,9 +424,9 @@ tr58:
 		}
 	goto st197;
 tr62:
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 256 "mod/box/memcached-grammar.rl"
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -442,13 +447,13 @@ tr62:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 92 "mod/box/memcached-grammar.rl"
+#line 97 "mod/box/memcached-grammar.rl"
 	{
 			struct tbuf *b;
 			void *value;
@@ -477,11 +482,11 @@ tr62:
 		}
 	goto st197;
 tr71:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 256 "mod/box/memcached-grammar.rl"
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -502,13 +507,13 @@ tr71:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 92 "mod/box/memcached-grammar.rl"
+#line 97 "mod/box/memcached-grammar.rl"
 	{
 			struct tbuf *b;
 			void *value;
@@ -537,11 +542,11 @@ tr71:
 		}
 	goto st197;
 tr91:
-#line 252 "mod/box/memcached-grammar.rl"
+#line 257 "mod/box/memcached-grammar.rl"
 	{cas = natoq(fstart, p);}
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 256 "mod/box/memcached-grammar.rl"
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -562,13 +567,13 @@ tr91:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 81 "mod/box/memcached-grammar.rl"
+#line 86 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
@@ -581,9 +586,9 @@ tr91:
 		}
 	goto st197;
 tr95:
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 256 "mod/box/memcached-grammar.rl"
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -604,13 +609,13 @@ tr95:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 81 "mod/box/memcached-grammar.rl"
+#line 86 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
@@ -623,11 +628,11 @@ tr95:
 		}
 	goto st197;
 tr105:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 256 "mod/box/memcached-grammar.rl"
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -648,13 +653,13 @@ tr105:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 81 "mod/box/memcached-grammar.rl"
+#line 86 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
@@ -667,17 +672,17 @@ tr105:
 		}
 	goto st197;
 tr118:
-#line 253 "mod/box/memcached-grammar.rl"
+#line 258 "mod/box/memcached-grammar.rl"
 	{incr = natoq(fstart, p);}
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 119 "mod/box/memcached-grammar.rl"
+#line 124 "mod/box/memcached-grammar.rl"
 	{
 			struct meta *m;
 			struct tbuf *b;
@@ -734,15 +739,15 @@ tr118:
 		}
 	goto st197;
 tr122:
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 119 "mod/box/memcached-grammar.rl"
+#line 124 "mod/box/memcached-grammar.rl"
 	{
 			struct meta *m;
 			struct tbuf *b;
@@ -799,17 +804,17 @@ tr122:
 		}
 	goto st197;
 tr132:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 119 "mod/box/memcached-grammar.rl"
+#line 124 "mod/box/memcached-grammar.rl"
 	{
 			struct meta *m;
 			struct tbuf *b;
@@ -866,15 +871,15 @@ tr132:
 		}
 	goto st197;
 tr141:
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 174 "mod/box/memcached-grammar.rl"
+#line 179 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
@@ -894,21 +899,21 @@ tr141:
 		}
 	goto st197;
 tr146:
-#line 243 "mod/box/memcached-grammar.rl"
+#line 248 "mod/box/memcached-grammar.rl"
 	{
 			exptime = natoq(fstart, p);
 			if (exptime > 0 && exptime <= 60*60*24*30)
 				exptime = exptime + ev_now();
 		}
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 174 "mod/box/memcached-grammar.rl"
+#line 179 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
@@ -928,17 +933,17 @@ tr146:
 		}
 	goto st197;
 tr157:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 174 "mod/box/memcached-grammar.rl"
+#line 179 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
@@ -958,15 +963,15 @@ tr157:
 		}
 	goto st197;
 tr169:
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 208 "mod/box/memcached-grammar.rl"
+#line 213 "mod/box/memcached-grammar.rl"
 	{
 			if (flush_delay > 0) {
 				struct fiber *f = fiber_create("flush_all", -1, -1, flush_all, (void *)flush_delay);
@@ -978,17 +983,17 @@ tr169:
 		}
 	goto st197;
 tr174:
-#line 254 "mod/box/memcached-grammar.rl"
+#line 259 "mod/box/memcached-grammar.rl"
 	{flush_delay = natoq(fstart, p);}
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 208 "mod/box/memcached-grammar.rl"
+#line 213 "mod/box/memcached-grammar.rl"
 	{
 			if (flush_delay > 0) {
 				struct fiber *f = fiber_create("flush_all", -1, -1, flush_all, (void *)flush_delay);
@@ -1000,17 +1005,17 @@ tr174:
 		}
 	goto st197;
 tr185:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 208 "mod/box/memcached-grammar.rl"
+#line 213 "mod/box/memcached-grammar.rl"
 	{
 			if (flush_delay > 0) {
 				struct fiber *f = fiber_create("flush_all", -1, -1, flush_all, (void *)flush_delay);
@@ -1022,15 +1027,15 @@ tr185:
 		}
 	goto st197;
 tr195:
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 192 "mod/box/memcached-grammar.rl"
+#line 197 "mod/box/memcached-grammar.rl"
 	{
 			struct box_txn *txn = txn_begin();
 			txn->flags |= BOX_GC_TXN;
@@ -1048,25 +1053,25 @@ tr195:
 		}
 	goto st197;
 tr213:
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 222 "mod/box/memcached-grammar.rl"
+#line 227 "mod/box/memcached-grammar.rl"
 	{
 			return 0;
 		}
 	goto st197;
 tr233:
-#line 251 "mod/box/memcached-grammar.rl"
-	{bytes = natoq(fstart, p);}
-#line 283 "mod/box/memcached-grammar.rl"
-	{ p++; }
 #line 256 "mod/box/memcached-grammar.rl"
+	{bytes = natoq(fstart, p);}
+#line 288 "mod/box/memcached-grammar.rl"
+	{ p++; }
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -1087,13 +1092,13 @@ tr233:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 72 "mod/box/memcached-grammar.rl"
+#line 77 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
@@ -1104,9 +1109,9 @@ tr233:
 		}
 	goto st197;
 tr237:
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 256 "mod/box/memcached-grammar.rl"
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -1127,13 +1132,13 @@ tr237:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 72 "mod/box/memcached-grammar.rl"
+#line 77 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
@@ -1144,11 +1149,11 @@ tr237:
 		}
 	goto st197;
 tr246:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 256 "mod/box/memcached-grammar.rl"
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -1169,13 +1174,13 @@ tr246:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 72 "mod/box/memcached-grammar.rl"
+#line 77 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
@@ -1186,11 +1191,11 @@ tr246:
 		}
 	goto st197;
 tr263:
-#line 251 "mod/box/memcached-grammar.rl"
-	{bytes = natoq(fstart, p);}
-#line 283 "mod/box/memcached-grammar.rl"
-	{ p++; }
 #line 256 "mod/box/memcached-grammar.rl"
+	{bytes = natoq(fstart, p);}
+#line 288 "mod/box/memcached-grammar.rl"
+	{ p++; }
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -1211,22 +1216,22 @@ tr263:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 58 "mod/box/memcached-grammar.rl"
+#line 63 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			STORE;
 		}
 	goto st197;
 tr267:
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 256 "mod/box/memcached-grammar.rl"
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -1247,24 +1252,24 @@ tr267:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 58 "mod/box/memcached-grammar.rl"
+#line 63 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			STORE;
 		}
 	goto st197;
 tr276:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 256 "mod/box/memcached-grammar.rl"
+#line 261 "mod/box/memcached-grammar.rl"
 	{
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
@@ -1285,28 +1290,28 @@ tr276:
 				goto exit;
 			}
 		}
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 58 "mod/box/memcached-grammar.rl"
+#line 63 "mod/box/memcached-grammar.rl"
 	{
 			key = read_field(keys);
 			STORE;
 		}
 	goto st197;
 tr281:
-#line 283 "mod/box/memcached-grammar.rl"
+#line 288 "mod/box/memcached-grammar.rl"
 	{ p++; }
-#line 277 "mod/box/memcached-grammar.rl"
+#line 282 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
 			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
 			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
 		}
-#line 218 "mod/box/memcached-grammar.rl"
+#line 223 "mod/box/memcached-grammar.rl"
 	{
 			print_stats();
 		}
@@ -1315,33 +1320,33 @@ st197:
 	if ( ++p == pe )
 		goto _test_eof197;
 case 197:
-#line 1319 "mod/box/memcached-grammar.m"
+#line 1324 "mod/box/memcached-grammar.m"
 	goto st0;
 tr27:
-#line 251 "mod/box/memcached-grammar.rl"
+#line 256 "mod/box/memcached-grammar.rl"
 	{bytes = natoq(fstart, p);}
 	goto st13;
 tr40:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
 	goto st13;
 st13:
 	if ( ++p == pe )
 		goto _test_eof13;
 case 13:
-#line 1333 "mod/box/memcached-grammar.m"
+#line 1338 "mod/box/memcached-grammar.m"
 	if ( (*p) == 10 )
 		goto tr30;
 	goto st0;
 tr28:
-#line 251 "mod/box/memcached-grammar.rl"
+#line 256 "mod/box/memcached-grammar.rl"
 	{bytes = natoq(fstart, p);}
 	goto st14;
 st14:
 	if ( ++p == pe )
 		goto _test_eof14;
 case 14:
-#line 1345 "mod/box/memcached-grammar.m"
+#line 1350 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 32: goto st14;
 		case 110: goto st15;
@@ -1434,18 +1439,18 @@ case 26:
 		goto tr45;
 	goto st0;
 tr45:
-#line 291 "mod/box/memcached-grammar.rl"
+#line 296 "mod/box/memcached-grammar.rl"
 	{append = true; }
 	goto st27;
 tr209:
-#line 292 "mod/box/memcached-grammar.rl"
+#line 297 "mod/box/memcached-grammar.rl"
 	{append = false;}
 	goto st27;
 st27:
 	if ( ++p == pe )
 		goto _test_eof27;
 case 27:
-#line 1449 "mod/box/memcached-grammar.m"
+#line 1454 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 13: goto st0;
 		case 32: goto st27;
@@ -1454,7 +1459,7 @@ case 27:
 		goto st0;
 	goto tr46;
 tr46:
-#line 227 "mod/box/memcached-grammar.rl"
+#line 232 "mod/box/memcached-grammar.rl"
 	{
 			fstart = p;
 			for (; p < pe && *p != ' ' && *p != '\r' && *p != '\n'; p++);
@@ -1471,7 +1476,7 @@ st28:
 	if ( ++p == pe )
 		goto _test_eof28;
 case 28:
-#line 1475 "mod/box/memcached-grammar.m"
+#line 1480 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st29;
 	goto st0;
@@ -1485,49 +1490,49 @@ case 29:
 		goto tr49;
 	goto st0;
 tr49:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st30;
 st30:
 	if ( ++p == pe )
 		goto _test_eof30;
 case 30:
-#line 1496 "mod/box/memcached-grammar.m"
+#line 1501 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto tr50;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto st30;
 	goto st0;
 tr50:
-#line 250 "mod/box/memcached-grammar.rl"
+#line 255 "mod/box/memcached-grammar.rl"
 	{flags = natoq(fstart, p);}
 	goto st31;
 st31:
 	if ( ++p == pe )
 		goto _test_eof31;
 case 31:
-#line 1510 "mod/box/memcached-grammar.m"
+#line 1515 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st31;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto tr53;
 	goto st0;
 tr53:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st32;
 st32:
 	if ( ++p == pe )
 		goto _test_eof32;
 case 32:
-#line 1524 "mod/box/memcached-grammar.m"
+#line 1529 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto tr54;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto st32;
 	goto st0;
 tr54:
-#line 243 "mod/box/memcached-grammar.rl"
+#line 248 "mod/box/memcached-grammar.rl"
 	{
 			exptime = natoq(fstart, p);
 			if (exptime > 0 && exptime <= 60*60*24*30)
@@ -1538,21 +1543,21 @@ st33:
 	if ( ++p == pe )
 		goto _test_eof33;
 case 33:
-#line 1542 "mod/box/memcached-grammar.m"
+#line 1547 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st33;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto tr57;
 	goto st0;
 tr57:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st34;
 st34:
 	if ( ++p == pe )
 		goto _test_eof34;
 case 34:
-#line 1556 "mod/box/memcached-grammar.m"
+#line 1561 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr58;
 		case 13: goto tr59;
@@ -1562,30 +1567,30 @@ case 34:
 		goto st34;
 	goto st0;
 tr59:
-#line 251 "mod/box/memcached-grammar.rl"
+#line 256 "mod/box/memcached-grammar.rl"
 	{bytes = natoq(fstart, p);}
 	goto st35;
 tr72:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
 	goto st35;
 st35:
 	if ( ++p == pe )
 		goto _test_eof35;
 case 35:
-#line 1577 "mod/box/memcached-grammar.m"
+#line 1582 "mod/box/memcached-grammar.m"
 	if ( (*p) == 10 )
 		goto tr62;
 	goto st0;
 tr60:
-#line 251 "mod/box/memcached-grammar.rl"
+#line 256 "mod/box/memcached-grammar.rl"
 	{bytes = natoq(fstart, p);}
 	goto st36;
 st36:
 	if ( ++p == pe )
 		goto _test_eof36;
 case 36:
-#line 1589 "mod/box/memcached-grammar.m"
+#line 1594 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 32: goto st36;
 		case 110: goto st37;
@@ -1675,7 +1680,7 @@ case 47:
 		goto st0;
 	goto tr76;
 tr76:
-#line 227 "mod/box/memcached-grammar.rl"
+#line 232 "mod/box/memcached-grammar.rl"
 	{
 			fstart = p;
 			for (; p < pe && *p != ' ' && *p != '\r' && *p != '\n'; p++);
@@ -1692,7 +1697,7 @@ st48:
 	if ( ++p == pe )
 		goto _test_eof48;
 case 48:
-#line 1696 "mod/box/memcached-grammar.m"
+#line 1701 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st49;
 	goto st0;
@@ -1706,49 +1711,49 @@ case 49:
 		goto tr78;
 	goto st0;
 tr78:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st50;
 st50:
 	if ( ++p == pe )
 		goto _test_eof50;
 case 50:
-#line 1717 "mod/box/memcached-grammar.m"
+#line 1722 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto tr79;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto st50;
 	goto st0;
 tr79:
-#line 250 "mod/box/memcached-grammar.rl"
+#line 255 "mod/box/memcached-grammar.rl"
 	{flags = natoq(fstart, p);}
 	goto st51;
 st51:
 	if ( ++p == pe )
 		goto _test_eof51;
 case 51:
-#line 1731 "mod/box/memcached-grammar.m"
+#line 1736 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st51;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto tr82;
 	goto st0;
 tr82:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st52;
 st52:
 	if ( ++p == pe )
 		goto _test_eof52;
 case 52:
-#line 1745 "mod/box/memcached-grammar.m"
+#line 1750 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto tr83;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto st52;
 	goto st0;
 tr83:
-#line 243 "mod/box/memcached-grammar.rl"
+#line 248 "mod/box/memcached-grammar.rl"
 	{
 			exptime = natoq(fstart, p);
 			if (exptime > 0 && exptime <= 60*60*24*30)
@@ -1759,49 +1764,49 @@ st53:
 	if ( ++p == pe )
 		goto _test_eof53;
 case 53:
-#line 1763 "mod/box/memcached-grammar.m"
+#line 1768 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st53;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto tr86;
 	goto st0;
 tr86:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st54;
 st54:
 	if ( ++p == pe )
 		goto _test_eof54;
 case 54:
-#line 1777 "mod/box/memcached-grammar.m"
+#line 1782 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto tr87;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto st54;
 	goto st0;
 tr87:
-#line 251 "mod/box/memcached-grammar.rl"
+#line 256 "mod/box/memcached-grammar.rl"
 	{bytes = natoq(fstart, p);}
 	goto st55;
 st55:
 	if ( ++p == pe )
 		goto _test_eof55;
 case 55:
-#line 1791 "mod/box/memcached-grammar.m"
+#line 1796 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st55;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto tr90;
 	goto st0;
 tr90:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st56;
 st56:
 	if ( ++p == pe )
 		goto _test_eof56;
 case 56:
-#line 1805 "mod/box/memcached-grammar.m"
+#line 1810 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr91;
 		case 13: goto tr92;
@@ -1811,30 +1816,30 @@ case 56:
 		goto st56;
 	goto st0;
 tr106:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
 	goto st57;
 tr92:
-#line 252 "mod/box/memcached-grammar.rl"
+#line 257 "mod/box/memcached-grammar.rl"
 	{cas = natoq(fstart, p);}
 	goto st57;
 st57:
 	if ( ++p == pe )
 		goto _test_eof57;
 case 57:
-#line 1826 "mod/box/memcached-grammar.m"
+#line 1831 "mod/box/memcached-grammar.m"
 	if ( (*p) == 10 )
 		goto tr95;
 	goto st0;
 tr93:
-#line 252 "mod/box/memcached-grammar.rl"
+#line 257 "mod/box/memcached-grammar.rl"
 	{cas = natoq(fstart, p);}
 	goto st58;
 st58:
 	if ( ++p == pe )
 		goto _test_eof58;
 case 58:
-#line 1838 "mod/box/memcached-grammar.m"
+#line 1843 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr95;
 		case 13: goto st57;
@@ -1895,14 +1900,14 @@ case 65:
 	}
 	goto st0;
 tr107:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
 	goto st66;
 st66:
 	if ( ++p == pe )
 		goto _test_eof66;
 case 66:
-#line 1906 "mod/box/memcached-grammar.m"
+#line 1911 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr95;
 		case 13: goto st57;
@@ -1940,18 +1945,18 @@ case 70:
 		goto tr113;
 	goto st0;
 tr113:
-#line 300 "mod/box/memcached-grammar.rl"
+#line 305 "mod/box/memcached-grammar.rl"
 	{incr_sign = -1;}
 	goto st71;
 tr202:
-#line 299 "mod/box/memcached-grammar.rl"
+#line 304 "mod/box/memcached-grammar.rl"
 	{incr_sign = 1; }
 	goto st71;
 st71:
 	if ( ++p == pe )
 		goto _test_eof71;
 case 71:
-#line 1955 "mod/box/memcached-grammar.m"
+#line 1960 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 13: goto st0;
 		case 32: goto st71;
@@ -1960,7 +1965,7 @@ case 71:
 		goto st0;
 	goto tr114;
 tr114:
-#line 227 "mod/box/memcached-grammar.rl"
+#line 232 "mod/box/memcached-grammar.rl"
 	{
 			fstart = p;
 			for (; p < pe && *p != ' ' && *p != '\r' && *p != '\n'; p++);
@@ -1977,7 +1982,7 @@ st72:
 	if ( ++p == pe )
 		goto _test_eof72;
 case 72:
-#line 1981 "mod/box/memcached-grammar.m"
+#line 1986 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st73;
 	goto st0;
@@ -1991,14 +1996,14 @@ case 73:
 		goto tr117;
 	goto st0;
 tr117:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st74;
 st74:
 	if ( ++p == pe )
 		goto _test_eof74;
 case 74:
-#line 2002 "mod/box/memcached-grammar.m"
+#line 2007 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr118;
 		case 13: goto tr119;
@@ -2008,30 +2013,30 @@ case 74:
 		goto st74;
 	goto st0;
 tr133:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
 	goto st75;
 tr119:
-#line 253 "mod/box/memcached-grammar.rl"
+#line 258 "mod/box/memcached-grammar.rl"
 	{incr = natoq(fstart, p);}
 	goto st75;
 st75:
 	if ( ++p == pe )
 		goto _test_eof75;
 case 75:
-#line 2023 "mod/box/memcached-grammar.m"
+#line 2028 "mod/box/memcached-grammar.m"
 	if ( (*p) == 10 )
 		goto tr122;
 	goto st0;
 tr120:
-#line 253 "mod/box/memcached-grammar.rl"
+#line 258 "mod/box/memcached-grammar.rl"
 	{incr = natoq(fstart, p);}
 	goto st76;
 st76:
 	if ( ++p == pe )
 		goto _test_eof76;
 case 76:
-#line 2035 "mod/box/memcached-grammar.m"
+#line 2040 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr122;
 		case 13: goto st75;
@@ -2092,14 +2097,14 @@ case 83:
 	}
 	goto st0;
 tr134:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
 	goto st84;
 st84:
 	if ( ++p == pe )
 		goto _test_eof84;
 case 84:
-#line 2103 "mod/box/memcached-grammar.m"
+#line 2108 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr122;
 		case 13: goto st75;
@@ -2146,7 +2151,7 @@ case 89:
 		goto st0;
 	goto tr140;
 tr140:
-#line 227 "mod/box/memcached-grammar.rl"
+#line 232 "mod/box/memcached-grammar.rl"
 	{
 			fstart = p;
 			for (; p < pe && *p != ' ' && *p != '\r' && *p != '\n'; p++);
@@ -2163,7 +2168,7 @@ st90:
 	if ( ++p == pe )
 		goto _test_eof90;
 case 90:
-#line 2167 "mod/box/memcached-grammar.m"
+#line 2172 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr141;
 		case 13: goto st91;
@@ -2171,7 +2176,7 @@ case 90:
 	}
 	goto st0;
 tr147:
-#line 243 "mod/box/memcached-grammar.rl"
+#line 248 "mod/box/memcached-grammar.rl"
 	{
 			exptime = natoq(fstart, p);
 			if (exptime > 0 && exptime <= 60*60*24*30)
@@ -2179,14 +2184,14 @@ tr147:
 		}
 	goto st91;
 tr158:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
 	goto st91;
 st91:
 	if ( ++p == pe )
 		goto _test_eof91;
 case 91:
-#line 2190 "mod/box/memcached-grammar.m"
+#line 2195 "mod/box/memcached-grammar.m"
 	if ( (*p) == 10 )
 		goto tr141;
 	goto st0;
@@ -2204,14 +2209,14 @@ case 92:
 		goto tr144;
 	goto st0;
 tr144:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st93;
 st93:
 	if ( ++p == pe )
 		goto _test_eof93;
 case 93:
-#line 2215 "mod/box/memcached-grammar.m"
+#line 2220 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr146;
 		case 13: goto tr147;
@@ -2221,7 +2226,7 @@ case 93:
 		goto st93;
 	goto st0;
 tr148:
-#line 243 "mod/box/memcached-grammar.rl"
+#line 248 "mod/box/memcached-grammar.rl"
 	{
 			exptime = natoq(fstart, p);
 			if (exptime > 0 && exptime <= 60*60*24*30)
@@ -2232,7 +2237,7 @@ st94:
 	if ( ++p == pe )
 		goto _test_eof94;
 case 94:
-#line 2236 "mod/box/memcached-grammar.m"
+#line 2241 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr141;
 		case 13: goto st91;
@@ -2293,14 +2298,14 @@ case 101:
 	}
 	goto st0;
 tr159:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
 	goto st102;
 st102:
 	if ( ++p == pe )
 		goto _test_eof102;
 case 102:
-#line 2304 "mod/box/memcached-grammar.m"
+#line 2309 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr141;
 		case 13: goto st91;
@@ -2374,18 +2379,18 @@ case 111:
 	}
 	goto st0;
 tr186:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
 	goto st112;
 tr175:
-#line 254 "mod/box/memcached-grammar.rl"
+#line 259 "mod/box/memcached-grammar.rl"
 	{flush_delay = natoq(fstart, p);}
 	goto st112;
 st112:
 	if ( ++p == pe )
 		goto _test_eof112;
 case 112:
-#line 2389 "mod/box/memcached-grammar.m"
+#line 2394 "mod/box/memcached-grammar.m"
 	if ( (*p) == 10 )
 		goto tr169;
 	goto st0;
@@ -2403,14 +2408,14 @@ case 113:
 		goto tr172;
 	goto st0;
 tr172:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st114;
 st114:
 	if ( ++p == pe )
 		goto _test_eof114;
 case 114:
-#line 2414 "mod/box/memcached-grammar.m"
+#line 2419 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr174;
 		case 13: goto tr175;
@@ -2420,14 +2425,14 @@ case 114:
 		goto st114;
 	goto st0;
 tr176:
-#line 254 "mod/box/memcached-grammar.rl"
+#line 259 "mod/box/memcached-grammar.rl"
 	{flush_delay = natoq(fstart, p);}
 	goto st115;
 st115:
 	if ( ++p == pe )
 		goto _test_eof115;
 case 115:
-#line 2431 "mod/box/memcached-grammar.m"
+#line 2436 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr169;
 		case 13: goto st112;
@@ -2488,14 +2493,14 @@ case 122:
 	}
 	goto st0;
 tr187:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
 	goto st123;
 st123:
 	if ( ++p == pe )
 		goto _test_eof123;
 case 123:
-#line 2499 "mod/box/memcached-grammar.m"
+#line 2504 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr169;
 		case 13: goto st112;
@@ -2526,18 +2531,18 @@ case 126:
 	}
 	goto st0;
 tr191:
-#line 296 "mod/box/memcached-grammar.rl"
+#line 301 "mod/box/memcached-grammar.rl"
 	{show_cas = false;}
 	goto st127;
 tr198:
-#line 297 "mod/box/memcached-grammar.rl"
+#line 302 "mod/box/memcached-grammar.rl"
 	{show_cas = true;}
 	goto st127;
 st127:
 	if ( ++p == pe )
 		goto _test_eof127;
 case 127:
-#line 2541 "mod/box/memcached-grammar.m"
+#line 2546 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 13: goto st0;
 		case 32: goto st127;
@@ -2546,7 +2551,7 @@ case 127:
 		goto st0;
 	goto tr193;
 tr193:
-#line 227 "mod/box/memcached-grammar.rl"
+#line 232 "mod/box/memcached-grammar.rl"
 	{
 			fstart = p;
 			for (; p < pe && *p != ' ' && *p != '\r' && *p != '\n'; p++);
@@ -2563,7 +2568,7 @@ st128:
 	if ( ++p == pe )
 		goto _test_eof128;
 case 128:
-#line 2567 "mod/box/memcached-grammar.m"
+#line 2572 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr195;
 		case 13: goto st129;
@@ -2770,7 +2775,7 @@ case 155:
 		goto st0;
 	goto tr222;
 tr222:
-#line 227 "mod/box/memcached-grammar.rl"
+#line 232 "mod/box/memcached-grammar.rl"
 	{
 			fstart = p;
 			for (; p < pe && *p != ' ' && *p != '\r' && *p != '\n'; p++);
@@ -2787,7 +2792,7 @@ st156:
 	if ( ++p == pe )
 		goto _test_eof156;
 case 156:
-#line 2791 "mod/box/memcached-grammar.m"
+#line 2796 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st157;
 	goto st0;
@@ -2801,49 +2806,49 @@ case 157:
 		goto tr224;
 	goto st0;
 tr224:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st158;
 st158:
 	if ( ++p == pe )
 		goto _test_eof158;
 case 158:
-#line 2812 "mod/box/memcached-grammar.m"
+#line 2817 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto tr225;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto st158;
 	goto st0;
 tr225:
-#line 250 "mod/box/memcached-grammar.rl"
+#line 255 "mod/box/memcached-grammar.rl"
 	{flags = natoq(fstart, p);}
 	goto st159;
 st159:
 	if ( ++p == pe )
 		goto _test_eof159;
 case 159:
-#line 2826 "mod/box/memcached-grammar.m"
+#line 2831 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st159;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto tr228;
 	goto st0;
 tr228:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st160;
 st160:
 	if ( ++p == pe )
 		goto _test_eof160;
 case 160:
-#line 2840 "mod/box/memcached-grammar.m"
+#line 2845 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto tr229;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto st160;
 	goto st0;
 tr229:
-#line 243 "mod/box/memcached-grammar.rl"
+#line 248 "mod/box/memcached-grammar.rl"
 	{
 			exptime = natoq(fstart, p);
 			if (exptime > 0 && exptime <= 60*60*24*30)
@@ -2854,21 +2859,21 @@ st161:
 	if ( ++p == pe )
 		goto _test_eof161;
 case 161:
-#line 2858 "mod/box/memcached-grammar.m"
+#line 2863 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st161;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto tr232;
 	goto st0;
 tr232:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st162;
 st162:
 	if ( ++p == pe )
 		goto _test_eof162;
 case 162:
-#line 2872 "mod/box/memcached-grammar.m"
+#line 2877 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr233;
 		case 13: goto tr234;
@@ -2878,30 +2883,30 @@ case 162:
 		goto st162;
 	goto st0;
 tr234:
-#line 251 "mod/box/memcached-grammar.rl"
+#line 256 "mod/box/memcached-grammar.rl"
 	{bytes = natoq(fstart, p);}
 	goto st163;
 tr247:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
 	goto st163;
 st163:
 	if ( ++p == pe )
 		goto _test_eof163;
 case 163:
-#line 2893 "mod/box/memcached-grammar.m"
+#line 2898 "mod/box/memcached-grammar.m"
 	if ( (*p) == 10 )
 		goto tr237;
 	goto st0;
 tr235:
-#line 251 "mod/box/memcached-grammar.rl"
+#line 256 "mod/box/memcached-grammar.rl"
 	{bytes = natoq(fstart, p);}
 	goto st164;
 st164:
 	if ( ++p == pe )
 		goto _test_eof164;
 case 164:
-#line 2905 "mod/box/memcached-grammar.m"
+#line 2910 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 32: goto st164;
 		case 110: goto st165;
@@ -2993,7 +2998,7 @@ case 175:
 		goto st0;
 	goto tr252;
 tr252:
-#line 227 "mod/box/memcached-grammar.rl"
+#line 232 "mod/box/memcached-grammar.rl"
 	{
 			fstart = p;
 			for (; p < pe && *p != ' ' && *p != '\r' && *p != '\n'; p++);
@@ -3010,7 +3015,7 @@ st176:
 	if ( ++p == pe )
 		goto _test_eof176;
 case 176:
-#line 3014 "mod/box/memcached-grammar.m"
+#line 3019 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st177;
 	goto st0;
@@ -3024,49 +3029,49 @@ case 177:
 		goto tr254;
 	goto st0;
 tr254:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st178;
 st178:
 	if ( ++p == pe )
 		goto _test_eof178;
 case 178:
-#line 3035 "mod/box/memcached-grammar.m"
+#line 3040 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto tr255;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto st178;
 	goto st0;
 tr255:
-#line 250 "mod/box/memcached-grammar.rl"
+#line 255 "mod/box/memcached-grammar.rl"
 	{flags = natoq(fstart, p);}
 	goto st179;
 st179:
 	if ( ++p == pe )
 		goto _test_eof179;
 case 179:
-#line 3049 "mod/box/memcached-grammar.m"
+#line 3054 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st179;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto tr258;
 	goto st0;
 tr258:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st180;
 st180:
 	if ( ++p == pe )
 		goto _test_eof180;
 case 180:
-#line 3063 "mod/box/memcached-grammar.m"
+#line 3068 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto tr259;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto st180;
 	goto st0;
 tr259:
-#line 243 "mod/box/memcached-grammar.rl"
+#line 248 "mod/box/memcached-grammar.rl"
 	{
 			exptime = natoq(fstart, p);
 			if (exptime > 0 && exptime <= 60*60*24*30)
@@ -3077,21 +3082,21 @@ st181:
 	if ( ++p == pe )
 		goto _test_eof181;
 case 181:
-#line 3081 "mod/box/memcached-grammar.m"
+#line 3086 "mod/box/memcached-grammar.m"
 	if ( (*p) == 32 )
 		goto st181;
 	if ( 48 <= (*p) && (*p) <= 57 )
 		goto tr262;
 	goto st0;
 tr262:
-#line 226 "mod/box/memcached-grammar.rl"
+#line 231 "mod/box/memcached-grammar.rl"
 	{ fstart = p; }
 	goto st182;
 st182:
 	if ( ++p == pe )
 		goto _test_eof182;
 case 182:
-#line 3095 "mod/box/memcached-grammar.m"
+#line 3100 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 10: goto tr263;
 		case 13: goto tr264;
@@ -3101,30 +3106,30 @@ case 182:
 		goto st182;
 	goto st0;
 tr264:
-#line 251 "mod/box/memcached-grammar.rl"
+#line 256 "mod/box/memcached-grammar.rl"
 	{bytes = natoq(fstart, p);}
 	goto st183;
 tr277:
-#line 285 "mod/box/memcached-grammar.rl"
+#line 290 "mod/box/memcached-grammar.rl"
 	{ noreply = true; }
 	goto st183;
 st183:
 	if ( ++p == pe )
 		goto _test_eof183;
 case 183:
-#line 3116 "mod/box/memcached-grammar.m"
+#line 3121 "mod/box/memcached-grammar.m"
 	if ( (*p) == 10 )
 		goto tr267;
 	goto st0;
 tr265:
-#line 251 "mod/box/memcached-grammar.rl"
+#line 256 "mod/box/memcached-grammar.rl"
 	{bytes = natoq(fstart, p);}
 	goto st184;
 st184:
 	if ( ++p == pe )
 		goto _test_eof184;
 case 184:
-#line 3128 "mod/box/memcached-grammar.m"
+#line 3133 "mod/box/memcached-grammar.m"
 	switch( (*p) ) {
 		case 32: goto st184;
 		case 110: goto st185;
@@ -3420,7 +3425,7 @@ case 196:
 	_out: {}
 	}
 
-#line 310 "mod/box/memcached-grammar.rl"
+#line 315 "mod/box/memcached-grammar.rl"
 
 
 	if (!done) {

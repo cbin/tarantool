@@ -68,6 +68,9 @@ if (ENABLE_TRACE)
   set (common_sources ${common_sources} trace.m)
 endif()
 
+file(GLOB objc_sources *.m)
+set_source_files_properties(${objc_sources} PROPERTIES COMPILE_FLAGS "-fgnu-runtime")
+
 add_library(core STATIC ${common_sources})
 add_dependencies(core generate_headers luajit)
 set_target_properties(core PROPERTIES COMPILE_FLAGS "${core_cflags}")

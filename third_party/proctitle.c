@@ -250,6 +250,8 @@ init_set_proc_title(int argc, char **argv)
 void
 free_proc_title(int argc, char **argv)
 {
+#ifndef PS_USE_NONE
+
 	int i;
 #if defined(PS_USE_CLOBBER_ARGV)
 	for (i = 0; environ[i] != NULL; i++)
@@ -260,6 +262,8 @@ free_proc_title(int argc, char **argv)
 	for (i = 0; i < argc; i++)
 		free(argv[i]);
 	free(argv);
+
+#endif /*PS_USE_NONE */
 }
 
 void

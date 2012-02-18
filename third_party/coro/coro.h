@@ -211,7 +211,8 @@ void coro_destroy (coro_context *ctx);
     && !defined(CORO_PTHREAD)
 # if defined(WINDOWS) || defined(_WIN32)
 #  define CORO_LOSER 1 /* you don't win with windoze */
-# elif defined(__linux) && (defined(__x86) || defined (__amd64))
+# elif (defined(__x86) || defined (__amd64)) && \
+       (defined(__linux) || (defined(__APPLE__) && defined(__MACH__)))
 #  define CORO_ASM 1
 # elif defined(HAVE_UCONTEXT_H)
 #  define CORO_UCONTEXT 1

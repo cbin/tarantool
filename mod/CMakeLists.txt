@@ -5,6 +5,10 @@ function(tarantool_module mod)
   set_source_files_properties(
       ${CMAKE_SOURCE_DIR}/cfg/tarantool_${mod}_cfg.c
       PROPERTIES COMPILE_FLAGS "-Wno-unused" GENERATED True)
+  set_source_files_properties(${recompiled_core_sources} PROPERTIES
+      COMPILE_FLAGS "-fgnu-runtime")
+  set_source_files_properties(${module_sources} PROPERTIES
+      COMPILE_FLAGS "-fgnu-runtime")
   add_executable(tarantool_${mod}
       ${module_sources}
       ${CMAKE_SOURCE_DIR}/cfg/tarantool_${mod}_cfg.c)
@@ -17,6 +21,10 @@ function(tarantool_module mod)
   target_link_libraries(tarantool_${mod} lt${mod} ${common_libraries})
   set_target_properties(tarantool_${mod} PROPERTIES COMPILE_FLAGS
       "${core_cflags}")
+  if(TARGET_OS_DARWIN)
+    set_target_properties(tarantool_${mod} PROPERTIES LINK_FLAGS
+        "-fgnu-runtime -pagezero_size 0x1000 -sectcreate __DATA __box_lua box.lua")
+  endif()
 
   if (ENABLE_STATIC)
       set_target_properties(tarantool_${mod} PROPERTIES

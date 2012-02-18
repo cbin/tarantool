@@ -29,6 +29,11 @@
 	write data;
 }%%
 
+#if TARGET_OS_DARWIN
+void * memmem(const void *haystack, size_t hlen,
+	      const void *needle, size_t nlen);
+#endif
+
 static int __attribute__((noinline))
 memcached_dispatch()
 {

@@ -46,6 +46,50 @@
 void *__libc_stack_end;
 #endif
 
+#if TARGET_OS_DARWIN
+
+void *
+memrchr(const void *p, int c, size_t n)
+{
+	const unsigned char *s = p;
+	const unsigned char *e = s + n;
+	while (s < e) {
+		if (*--e == (unsigned char) c)
+			return (void *) e;
+	}
+
+	return NULL;
+}
+
+void *
+memmem(const void *haystack, size_t hlen,
+       const void *needle, size_t nlen)
+{
+	if (nlen == 0)
+		return (void *) haystack;
+	if (nlen > hlen)
+		return NULL;
+
+	const unsigned char *h = haystack;
+	const unsigned char *n = needle;
+	for (;;) {
+		const unsigned char *p = memchr(h, *n, hlen);
+		if (p == NULL)
+			break;
+		hlen -= p - h;
+		if (nlen > hlen)
+			break;
+		h = p;
+		if (nlen == 1 || memcmp(h + 1, n + 1, nlen - 1) == 0)
+			return (void *) h;
+		--hlen;
+		++h;
+	}
+
+	return NULL;
+}
+
+#endif
 
 /** Find a string in an array of strings.
  *

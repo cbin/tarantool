@@ -45,6 +45,10 @@
 #include <pickle.h>
 #include <cpu_feature.h>
 
+#if TARGET_OS_DARWIN
+void * memrchr(const void *p, int c, size_t n);
+#endif
+
 const u16 snap_tag = -1;
 const u16 wal_tag = -2;
 const u64 default_cookie = 0;

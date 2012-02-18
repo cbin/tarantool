@@ -15,9 +15,14 @@ add_custom_target(generate_memcached_grammar_m DEPENDS
 execute_process(COMMAND ${CMAKE_COMMAND} -E touch_nocreate
     ${CMAKE_SOURCE_DIR}/mod/box/memcached-grammar.m)
 
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/box.lua.o
-    COMMAND cd ${CMAKE_SOURCE_DIR}/mod/box && ${LD} -r -b binary box.lua -o ${CMAKE_CURRENT_BINARY_DIR}/box.lua.o
-    DEPENDS box.lua)
+if(TARGET_OS_DARWIN)
+    set(BOX_LUA "")
+else()
+    set(BOX_LUA "box.lua.o")
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/box.lua.o
+        COMMAND cd ${CMAKE_SOURCE_DIR}/mod/box && ${LD} -r -b binary box.lua -o ${CMAKE_CURRENT_BINARY_DIR}/box.lua.o
+        DEPENDS box.lua)
+endif()
 
 set_source_files_properties(box.lua.o
     PROPERTIES EXTERNAL_OBJECT true)
@@ -30,4 +35,4 @@ set_source_files_properties(memcached.m
 
 tarantool_module("box" tuple.m index.m tree.m box.m box_lua.m
     memcached.m memcached-grammar.m
-    box.lua.o)
+    ${BOX_LUA})
