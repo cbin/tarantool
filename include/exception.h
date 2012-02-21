@@ -45,6 +45,7 @@
 }
 
 + (id) alloc;
++ (id) alloc_real;
 @end
 
 

@@ -43,6 +43,10 @@
 	}
 	return e;
 }
++ (id) alloc_real
+{
+	return [super alloc];
+}
 @end
 
 

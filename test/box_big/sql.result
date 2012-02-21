@@ -373,11 +373,11 @@ lua for k, v in box.space[4]:pairs() do print(v) end
 ...
 lua box.space[4].index[0].idx:min()
 ---
-error: 'Unsupported'
+error: 'Lua error: Unsupported'
 ...
 lua box.space[4].index[0].idx:max()
 ---
-error: 'Unsupported'
+error: 'Lua error: Unsupported'
 ...
 lua box.space[4].index[1].idx:min()
 ---
