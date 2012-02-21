@@ -141,8 +141,7 @@ tuple_txn_ref(struct box_txn *txn, struct box_tuple *tuple)
 static void
 validate_indexes(struct box_txn *txn)
 {
-	struct space *sp = &space[txn->n];
-	int n = index_count(sp);
+	int n = index_count(txn->space);
 
 	/* Only secondary indexes are validated here. So check to see
 	   if there are any.*/
@@ -151,22 +150,22 @@ validate_indexes(struct box_txn *txn)
 	}
 
 	/* Check to see if the tuple has a sufficient number of fields. */
-	if (txn->tuple->cardinality < sp->field_count)
+	if (txn->tuple->cardinality < txn->space->field_count)
 		tnt_raise(IllegalParams, :"tuple must have all indexed fields");
 
 	/* Sweep through the tuple and check the field sizes. */
 	u8 *data = txn->tuple->data;
-	for (int f = 0; f < sp->field_count; ++f) {
+	for (int f = 0; f < txn->space->field_count; ++f) {
 		/* Get the size of the current field and advance. */
 		u32 len = load_varint32((void **) &data);
 		data += len;
 
 		/* Check fixed size fields (NUM and NUM64) and skip undefined
 		   size fields (STRING and UNKNOWN). */
-		if (sp->field_types[f] == NUM) {
+		if (txn->space->field_types[f] == NUM) {
 			if (len != sizeof(u32))
 				tnt_raise(IllegalParams, :"field must be NUM");
-		} else if (sp->field_types[f] == NUM64) {
+		} else if (txn->space->field_types[f] == NUM64) {
 			if (len != sizeof(u64))
 				tnt_raise(IllegalParams, :"field must be NUM64");
 		}
@@ -174,7 +173,7 @@ validate_indexes(struct box_txn *txn)
 
 	/* Check key uniqueness */
 	for (int i = 1; i < n; ++i) {
-		Index *index = space[txn->n].index[i];
+		Index *index = txn->space->index[i];
 		if (index->key_def->is_unique) {
 			struct box_tuple *tuple = [index findByTuple: txn->tuple];
 			if (tuple != NULL && tuple != txn->old_tuple)
@@ -240,9 +239,9 @@ prepare_replace(struct box_txn *txn, size_t cardinality, struct tbuf *data)
 		 * Tuple reference counter will be incremented in
 		 * txn_commit().
 		 */
-		int n = index_count(&space[txn->n]);
+		int n = index_count(txn->space);
 		for (int i = 0; i < n; i++) {
-			Index *index = space[txn->n].index[i];
+			Index *index = txn->space->index[i];
 			[index replace: NULL :txn->tuple];
 		}
 	}
@@ -257,9 +256,9 @@ static void
 commit_replace(struct box_txn *txn)
 {
 	if (txn->old_tuple != NULL) {
-		int n = index_count(&space[txn->n]);
+		int n = index_count(txn->space);
 		for (int i = 0; i < n; i++) {
-			Index *index = space[txn->n].index[i];
+			Index *index = txn->space->index[i];
 			[index replace: txn->old_tuple :txn->tuple];
 		}
 
@@ -278,9 +277,9 @@ rollback_replace(struct box_txn *txn)
 	say_debug("rollback_replace: txn->tuple:%p", txn->tuple);
 
 	if (txn->tuple && txn->tuple->flags & GHOST) {
-		int n = index_count(&space[txn->n]);
+		int n = index_count(txn->space);
 		for (int i = 0; i < n; i++) {
-			Index *index = space[txn->n].index[i];
+			Index *index = txn->space->index[i];
 			[index remove: txn->tuple];
 		}
 	}
@@ -966,9 +965,9 @@ commit_delete(struct box_txn *txn)
 	if (txn->old_tuple == NULL)
 		return;
 
-	int n = index_count(&space[txn->n]);
+	int n = index_count(txn->space);
 	for (int i = 0; i < n; i++) {
-		Index *index = space[txn->n].index[i];
+		Index *index = txn->space->index[i];
 		[index remove: txn->old_tuple];
 	}
 
@@ -1034,15 +1033,15 @@ txn_begin()
 
 void txn_assign_n(struct box_txn *txn, struct tbuf *data)
 {
-	txn->n = read_u32(data);
+	u32 n = read_u32(data);
 
-	if (txn->n < 0 || txn->n >= BOX_SPACE_MAX)
-		tnt_raise(ClientError, :ER_NO_SUCH_SPACE, txn->n);
+	if (n >= BOX_SPACE_MAX)
+		tnt_raise(ClientError, :ER_NO_SUCH_SPACE, n);
 
-	txn->space = &space[txn->n];
+	txn->space = &space[n];
 
 	if (!txn->space->enabled)
-		tnt_raise(ClientError, :ER_SPACE_DISABLED, txn->n);
+		tnt_raise(ClientError, :ER_SPACE_DISABLED, n);
 
 	txn->index = txn->space->index[0];
 }
@@ -1153,8 +1152,8 @@ box_dispatch(struct box_txn *txn, struct tbuf *data)
 		txn_assign_n(txn, data);
 		txn->flags |= read_u32(data) & BOX_ALLOWED_REQUEST_FLAGS;
 		cardinality = read_u32(data);
-		if (space[txn->n].cardinality > 0
-		    && space[txn->n].cardinality != cardinality)
+		if (txn->space->cardinality > 0
+		    && txn->space->cardinality != cardinality)
 			tnt_raise(IllegalParams, :"tuple cardinality must match space cardinality");
 		prepare_replace(txn, cardinality, data);
 		break;
@@ -1183,9 +1182,10 @@ box_dispatch(struct box_txn *txn, struct tbuf *data)
 		u32 offset = read_u32(data);
 		u32 limit = read_u32(data);
 
-		if (i >= space[txn->n].key_count)
-			tnt_raise(LoggedError, :ER_NO_SUCH_INDEX, i, txn->n);
-		txn->index = space[txn->n].index[i];
+		if (i >= txn->space->key_count)
+			tnt_raise(LoggedError, :ER_NO_SUCH_INDEX,
+				  i, space_n(txn->space));
+		txn->index = txn->space->index[i];
 
 		process_select(txn, limit, offset, data);
 		break;
