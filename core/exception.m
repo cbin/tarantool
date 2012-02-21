@@ -43,10 +43,6 @@
 	}
 	return e;
 }
-+ (id) alloc_real
-{
-	return [super alloc];
-}
 @end
 
 
@@ -92,6 +88,7 @@
 	return [super init: ER_ILLEGAL_PARAMS, msg];
 }
 @end
+
 
 @implementation ErrorInjection
 - (id) init: (const char*) msg

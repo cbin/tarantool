@@ -692,14 +692,6 @@ void box_lua_find(lua_State *L, const char *name, const char *name_end)
 		lua_remove(L, index);
 }
 
-static int
-box_lua_panic(struct lua_State *L)
-{
-	say_info("panic!\n\n");
-	tnt_raise(ClientError, :ER_PROC_LUA, lua_tostring(L, -1));
-	return 0;
-}
-
 /**
  * Invoke a Lua stored procedure from the binary protocol
  * (implementation of 'CALL' command code).
@@ -722,42 +714,15 @@ void box_lua_call(struct box_txn *txn __attribute__((unused)),
 			field = read_str(data, field_len);
 			lua_pushlstring(L, field, field_len);
 		}
-
-		//lua_call(L, nargs, LUA_MULTRET);
-
 		if (lua_pcall(L, nargs, LUA_MULTRET, 0) != 0) {
 			if (lua_isuserdata(L, -1)) {
-				const ClientError *ep = lua_topointer(L, -1);
-
-				ClientError *e = [ClientError alloc_real];
-				e->file = ep->file;
-				e->line = ep->line;
-				[e init :ep->errcode, ""];
-
-				strncpy(e->errmsg, ep->errmsg, TNT_ERRMSG_MAX);
-				@throw e;
-				//tnt_raise(ClientError, :e_->errcode, e_->errmsg);
-
-				/*
-				ClientError *e = [ClientError alloc];
-				e->file = e_->file;
-				e->line = e_->line;
-				[e init :e_->errcode, e_->errmsg];
-				@throw e;
-				*/
-
-				//tnt_raise(ClientError, :e_->errcode, e_->errmsg);
-				//@throw (ClientError*)lua_topointer(L, -1);
+				/* forwarding pcall exception */
+				@throw (ClientError*)lua_topointer(L, -1);
 			} else {
 				tnt_raise(ClientError, :ER_PROC_LUA, lua_tostring(L, -1));
 			}
 		}
 
-		/*
-		if (lua_pcall(L, nargs, LUA_MULTRET, 0) != 0) {
-			tnt_raise(ClientError, :ER_PROC_LUA, lua_tostring(L, -1));
-		}
-		*/
 		/* Send results of the called procedure to the client. */
 		iov_add_multret(L);
 	} @finally {
@@ -772,7 +737,6 @@ void box_lua_call(struct box_txn *txn __attribute__((unused)),
 struct lua_State *
 mod_lua_init(struct lua_State *L)
 {
-	lua_atpanic(L, box_lua_panic);
 	/* box, box.tuple */
 	tarantool_lua_register_type(L, tuplelib_name, lbox_tuple_meta);
 	luaL_register(L, "box", boxlib);

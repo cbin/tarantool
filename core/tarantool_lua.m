@@ -406,9 +406,6 @@ lbox_fiber_gc(struct lua_State *L)
 }
 
 static void
-tarantool_lua_printstack(struct lua_State *L, struct tbuf *out);
-
-static void
 box_lua_fiber_run(void *arg __attribute__((unused)))
 {
 	fiber_setcancelstate(true);
@@ -425,102 +422,19 @@ box_lua_fiber_run(void *arg __attribute__((unused)))
 	 * completion status plus whatever the coroutine main
 	 * function returns. Follow this style here.
 	 */
-
-	/*
-	struct tbuf *d = tbuf_alloc(fiber->gc_pool);
-	tarantool_lua_printstack(L, d);
-	*/
-
 	if (lua_pcall(L, lua_gettop(L) - 1, LUA_MULTRET, 0) != 0) {
-		/*
-		if (lua_isuserdata(L, -1)) {
-			const ClientError *ep = lua_topointer(L, -1);
-			ClientError *e = [ClientError alloc_real];
-			e->file = ep->file;
-			e->line = ep->line;
-			[e init :ep->errcode, ""];
-			strncpy(e->errmsg, ep->errmsg, TNT_ERRMSG_MAX);
-			lua_pushlightuserdata(L, e);
-		} else {
-		}
-		*/
-
-		//luaL_unref(L, LUA_REGISTRYINDEX, coro_ref);
-		//
-
-		/*
-		const ClientError *ep = NULL;
-		const char *s = NULL;
-
-		if (lua_isuserdata(L, -1)) {
-			ep = lua_topointer(L, -1);
-		} else {
-			s = lua_tostring(L, -1);
-		}
-		*/
-		//lua_settop(L, 0); /* pop any possible garbage */
-		//lua_pushboolean(L, false); /* completion status */
-		/*
-		if (ep) 
-			lua_pushlightuserdata(L, (void*)ep);
-		else
-			lua_pushstring(L, s);
-			*/
-
+		/* forwarding pcall result (exception data or string) and
+		 * pusing completion status */
 		lua_pushboolean(L, false);
-		lua_insert(L, 1);
-
 	} else {
-		lua_pushboolean(L, true); /* push completion status */
-		lua_insert(L, 1); /* move 'true' to stack start */
+		lua_pushboolean(L, true);
 	}
-
+	lua_insert(L, 1); /* move 'status' to stack start */
 	/*
 	 * If the coroutine has detached itself, collect
 	 * its resources here.
 	 */
 	luaL_unref(L, LUA_REGISTRYINDEX, coro_ref);
-#if 0
-	@try {
-		// XXX
-		if (lua_pcall(L, 0, LUA_MULTRET, 0) != 0) {
-			//tnt_raise(ClientError, :ER_PROC_LUA, lua_tostring(L, -1));
-			//
-			if (lua_isuserdata(L, -1)) {
-				const ClientError *ep = lua_topointer(L, -1);
-				ClientError *e = [ClientError alloc_real];
-				e->file = ep->file;
-				e->line = ep->line;
-				[e init :ep->errcode, ""];
-				strncpy(e->errmsg, ep->errmsg, TNT_ERRMSG_MAX);
-				@throw e;
-			} else {
-				tnt_raise(ClientError, :ER_PROC_LUA, lua_tostring(L, -1));
-			}
-		}
-
-		lua_pushboolean(L, true); /* push completion status */
-		lua_insert(L, 1); /* move 'true' to stack start */
-	} @catch (ClientError *e) {
-		say_info("fiber_run Exception!\n");
-		/*
-		 * Note: FiberCancelException passes through this
-		 * catch and thus leaves garbage on coroutine
-		 * stack. This is OK since it is only possible to
-		 * cancel a fiber which is not scheduled, and
-		 * cancel() is synchronous.
-		 */
-		lua_settop(L, 0); /* pop any possible garbage */
-		lua_pushboolean(L, false); /* completion status */
-		lua_pushstring(L, e->errmsg); /* error message */
-	} @finally {
-		/*
-		 * If the coroutine has detached itself, collect
-		 * its resources here.
-		 */
-		luaL_unref(L, LUA_REGISTRYINDEX, coro_ref);
-	}
-#endif
 	/* L stack contains nothing but call results */
 }
 
@@ -817,44 +731,25 @@ lbox_print(struct lua_State *L)
  *
  * See Lua documentation on 'pcall' for additional information.
  */
-
 static int
 lbox_pcall(struct lua_State *L)
 {
 	if (lua_pcall(L, lua_gettop(L) - 1, LUA_MULTRET, 0) != 0) {
+	       	/* push completion status and moving it to stack start*/
 		lua_pushboolean(L, false);
 		lua_insert(L, 1);
+		/* if pcall would return exception data, changing it 
+		 * error string */
 		if (lua_isuserdata(L, -1)) {
 			const ClientError *ep = lua_topointer(L, -1);
 			lua_pop(L, 1);
 			lua_pushstring(L, ep->errmsg);
 		} 
 	} else {
-		lua_pushboolean(L, true); /* push completion status */
-		lua_insert(L, 1); /* move 'true' to stack start */
+		lua_pushboolean(L, true);
+		lua_insert(L, 1);
 	}
 	return lua_gettop(L);
-#if 0
-	/*
-	 * Lua pcall() returns true/false for completion status
-	 * plus whatever the called function returns.
-	 */
-	@try {
-		lua_call(L, lua_gettop(L) - 1, LUA_MULTRET);
-		lua_pushboolean(L, true); /* push completion status */
-		lua_insert(L, 1); /* move 'true' to stack start */
-	} @catch (ClientError *e) {
-		/*
-		 * Note: FiberCancelException passes through this
-		 * catch and thus leaves garbage on coroutine
-		 * stack.
-		 */
-		lua_settop(L, 0); /* pop any possible garbage */
-		lua_pushboolean(L, false); /* completion status */
-		lua_pushstring(L, e->errmsg); /* error message */
-	}
-	return lua_gettop(L);
-#endif
 }
 
 /** A helper to register a single type metatable. */
@@ -876,14 +771,14 @@ tarantool_lua_register_type(struct lua_State *L, const char *type_name,
 	lua_pop(L, 1);
 }
 
-static int wrap_exceptions(lua_State *L, lua_CFunction f)
+static int
+tarantool_lua_cb(lua_State *L, lua_CFunction f)
 {
 	@try {
 		return f(L);
 	} @catch (ClientError *e) {
+		/* forwaring exception to lua_pcall callers */
 		lua_pushlightuserdata(L, e);
-	} @catch (...) {
-		say_info("UNHANDLED!\n");
 	}
 	return lua_error(L);
 }
@@ -894,8 +789,8 @@ tarantool_lua_init()
 	lua_State *L = luaL_newstate();
 	if (L == NULL)
 		return L;
-
-	lua_pushlightuserdata(L, (void *)wrap_exceptions);
+	/* registering cfunction wrapper */
+	lua_pushlightuserdata(L, (void *)tarantool_lua_cb);
 	luaJIT_setmode(L, -1, LUAJIT_MODE_WRAPCFUNC|LUAJIT_MODE_ON);
 	lua_pop(L, 1);
 
@@ -936,21 +831,16 @@ tarantool_lua_dostring(struct lua_State *L, const char *str)
 		if (r)
 			return r;
 	}
-
-	if (lua_pcall(L, 0, LUA_MULTRET, 0) != 0)
-		return 1;
-
-	/*
-	@try {
-		//lua_pcall(L, 0, LUA_MULTRET);
-		if (lua_pcall(L, 0, LUA_MULTRET, 0) != 0) {
-			tnt_raise(ClientError, :ER_PROC_LUA, lua_tostring(L, -1));
+	if (lua_pcall(L, 0, LUA_MULTRET, 0) != 0) {
+		/* if pcall returns exception data, changing it to
+		 * error message */
+		if (lua_isuserdata(L, -1)) {
+			const ClientError *e = lua_topointer(L, -1);
+			lua_pop(L, 1);
+			lua_pushstring(L, e->errmsg);
 		}
-	} @catch (ClientError *e) {
-		lua_pushstring(L, e->errmsg);
 		return 1;
 	}
-	*/
 	return 0;
 }
 
@@ -962,18 +852,9 @@ tarantool_lua(struct lua_State *L,
 	int r = tarantool_lua_dostring(L, str);
 	tarantool_lua_set_out(L, NULL);
 	if (r) {
-		/* Make sure the output is YAMLish */
-		if (lua_isuserdata(L, -1)) {
-			const ClientError *e = lua_topointer(L, -1);
-			tbuf_printf(out, "error: 'Lua error: %s'\r\n",
-				    luaL_gsub(L, e->errmsg, "'", "''"));
-		} else {
-			tbuf_printf(out, "error: 'Lua error: %s'\r\n",
-				    luaL_gsub(L, lua_tostring(L, -1),
-					      "'", "''"));
-		}
-	}
-	else {
+		tbuf_printf(out, "error: 'Lua error: %s'\r\n",
+			    luaL_gsub(L, lua_tostring(L, -1), "'", "''"));
+	} else {
 		tarantool_lua_printstack_yaml(L, out);
 	}
 	lua_settop(L, 0); /* clear the stack from return values. */
