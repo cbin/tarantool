@@ -592,7 +592,7 @@ box_lua_add_u32(u32 *p_u32 __attribute__((unused)))
 static void
 box_lua_add_tuple(struct box_tuple *tuple)
 {
-	struct lua_State *L = in_txn()->L;
+	struct lua_State *L = fiber->mod_data.L;
 	lbox_pushtuple(L, tuple);
 }
 
@@ -611,7 +611,7 @@ txn_enter_lua(lua_State *L)
 	fiber->mod_data.txn = NULL;
 	struct box_txn *txn = fiber->mod_data.txn = txn_begin();
 	txn->out = &box_out_lua;
-	txn->L = L;
+	fiber->mod_data.L = L;
 	return old_txn;
 }
 

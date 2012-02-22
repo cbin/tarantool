@@ -49,12 +49,11 @@
 #include "memcached.h"
 #include "box_lua.h"
 
-static void box_process_ro(u32 op, struct tbuf *request_data);
-static void box_process_rw(u32 op, struct tbuf *request_data);
-
 const char *mod_name = "Box";
 
-iproto_callback rw_callback = box_process_ro;
+iproto_callback rw_callback = txn_process_ro;
+iproto_callback lrw_callback = txn_process_lro;
+
 static char status[64] = "unknown";
 
 static int stat_base;
@@ -1031,21 +1030,6 @@ txn_begin()
 	return txn;
 }
 
-void txn_assign_n(struct box_txn *txn, struct tbuf *data)
-{
-	u32 n = read_u32(data);
-
-	if (n >= BOX_SPACE_MAX)
-		tnt_raise(ClientError, :ER_NO_SUCH_SPACE, n);
-
-	txn->space = &space[n];
-
-	if (!txn->space->enabled)
-		tnt_raise(ClientError, :ER_SPACE_DISABLED, n);
-
-	txn->index = txn->space->index[0];
-}
-
 /** Remember op code/request in the txn. */
 static void
 txn_set_op(struct box_txn *txn, u16 op, struct tbuf *data)
@@ -1056,6 +1040,36 @@ txn_set_op(struct box_txn *txn, u16 op, struct tbuf *data)
 		.size = data->size,
 		.capacity = data->size,
 		.pool = NULL };
+}
+
+static void
+txn_set_spc_idx(struct box_txn *txn, u32 spc_n, u32 idx_n)
+{
+	if (spc_n >= BOX_SPACE_MAX)
+		tnt_raise(ClientError, :ER_NO_SUCH_SPACE, spc_n);
+	txn->space = &space[spc_n];
+
+	if (!txn->space->enabled)
+		tnt_raise(ClientError, :ER_SPACE_DISABLED, spc_n);
+
+	if (idx_n >= txn->space->key_count)
+		tnt_raise(LoggedError, :ER_NO_SUCH_INDEX, idx_n, spc_n);
+	txn->index = txn->space->index[idx_n];
+}
+
+void
+txn_assign_spc(struct box_txn *txn, struct tbuf *data)
+{
+	u32 spc_n = read_u32(data);
+	txn_set_spc_idx(txn, spc_n, 0);
+}
+
+void
+txn_assign_spc_idx(struct box_txn *txn, struct tbuf *data)
+{
+	u32 spc_n = read_u32(data);
+	u32 idx_n = read_u32(data);
+	txn_set_spc_idx(txn, spc_n, idx_n);
 }
 
 static void
@@ -1139,72 +1153,207 @@ txn_rollback(struct box_txn *txn)
 }
 
 static void
-box_dispatch(struct box_txn *txn, struct tbuf *data)
+txn_prepare_select(struct box_txn *txn, struct tbuf *data)
 {
-	u32 cardinality;
-	void *key;
-	u32 key_len;
+	ERROR_INJECT(ERRINJ_TESTING);
 
-	say_debug("box_dispatch(%i)", txn->op);
+	txn_assign_spc_idx(txn, data);
+
+	u32 offset = read_u32(data);
+	u32 limit = read_u32(data);
+
+	process_select(txn, limit, offset, data);
+}
+
+static void
+txn_prepare_delete(struct box_txn *txn, struct tbuf *data)
+{
+	txn_assign_spc(txn, data);
+
+	if (txn->op == DELETE) {
+		txn->flags |= read_u32(data);
+		txn->flags &= BOX_ALLOWED_REQUEST_FLAGS;
+	}
+
+	u32 key_len = read_u32(data);
+	if (key_len != 1)
+		tnt_raise(IllegalParams, :"key must be single valued");
+
+	void *key = read_field(data);
+	if (data->size != 0)
+		tnt_raise(IllegalParams, :"can't unpack request");
+
+	prepare_delete(txn, key);
+}
+
+static void
+txn_prepare_update(struct box_txn *txn, struct tbuf *data)
+{
+	txn_assign_spc(txn, data);
+
+	txn->flags |= read_u32(data);
+	txn->flags &= BOX_ALLOWED_REQUEST_FLAGS;
+
+	prepare_update(txn, data);
+}
+
+static void
+txn_prepare_replace(struct box_txn *txn, struct tbuf *data)
+{
+	txn_assign_spc(txn, data);
+
+	txn->flags |= read_u32(data);
+	txn->flags &= BOX_ALLOWED_REQUEST_FLAGS;
+
+	u32 cardinality = read_u32(data);
+	if (txn->space->cardinality > 0
+	    && txn->space->cardinality != cardinality)
+		tnt_raise(IllegalParams, :"tuple cardinality must match space cardinality");
+
+	prepare_replace(txn, cardinality, data);
+}
+
+static void
+txn_lua_call(struct box_txn *txn, struct tbuf *data)
+{
+	txn->flags |= read_u32(data);
+	txn->flags &= BOX_ALLOWED_REQUEST_FLAGS;
+
+	box_lua_call(txn, data);
+}
+
+static void
+txn_prepare_ro(struct box_txn *txn, struct tbuf *data)
+{
+	say_debug("txn_prepare_ro(%i)", txn->op);
 
 	switch (txn->op) {
-	case REPLACE:
-		txn_assign_n(txn, data);
-		txn->flags |= read_u32(data) & BOX_ALLOWED_REQUEST_FLAGS;
-		cardinality = read_u32(data);
-		if (txn->space->cardinality > 0
-		    && txn->space->cardinality != cardinality)
-			tnt_raise(IllegalParams, :"tuple cardinality must match space cardinality");
-		prepare_replace(txn, cardinality, data);
+	case SELECT:
+		txn_prepare_select(txn, data);
 		break;
 
 	case DELETE:
 	case DELETE_1_3:
-		txn_assign_n(txn, data);
-		if (txn->op == DELETE)
-			txn->flags |= read_u32(data) & BOX_ALLOWED_REQUEST_FLAGS;
-		key_len = read_u32(data);
-		if (key_len != 1)
-			tnt_raise(IllegalParams, :"key must be single valued");
+	case UPDATE:
+	case REPLACE:
+		tnt_raise(LoggedError, :ER_NONMASTER);
 
-		key = read_field(data);
-		if (data->size != 0)
-			tnt_raise(IllegalParams, :"can't unpack request");
-
-		prepare_delete(txn, key);
-		break;
-
-	case SELECT:
-	{
-		ERROR_INJECT(ERRINJ_TESTING);
-		txn_assign_n(txn, data);
-		u32 i = read_u32(data);
-		u32 offset = read_u32(data);
-		u32 limit = read_u32(data);
-
-		if (i >= txn->space->key_count)
-			tnt_raise(LoggedError, :ER_NO_SUCH_INDEX,
-				  i, space_n(txn->space));
-		txn->index = txn->space->index[i];
-
-		process_select(txn, limit, offset, data);
-		break;
+	default:
+		say_error("box_dispatch: unsupported command = %" PRIi32 "", txn->op);
+		tnt_raise(IllegalParams, :"unsupported command code, check the error log");
 	}
+}
+
+static void
+txn_prepare_rw(struct box_txn *txn, struct tbuf *data)
+{
+	say_debug("txn_prepare_rw(%i)", txn->op);
+
+	switch (txn->op) {
+	case SELECT:
+		txn_prepare_select(txn, data);
+		break;
+
+	case DELETE:
+	case DELETE_1_3:
+		txn_prepare_delete(txn, data);
+		break;
 
 	case UPDATE:
-		txn_assign_n(txn, data);
-		txn->flags |= read_u32(data) & BOX_ALLOWED_REQUEST_FLAGS;
-		prepare_update(txn, data);
+		txn_prepare_update(txn, data);
 		break;
-	case CALL:
-		txn->flags |= read_u32(data) & BOX_ALLOWED_REQUEST_FLAGS;
-		box_lua_call(txn, data);
+
+	case REPLACE:
+		txn_prepare_replace(txn, data);
 		break;
 
 	default:
 		say_error("box_dispatch: unsupported command = %" PRIi32 "", txn->op);
 		tnt_raise(IllegalParams, :"unsupported command code, check the error log");
 	}
+}
+
+static void
+txn_prepare_lro(struct box_txn *txn, struct tbuf *data)
+{
+	if (txn->op == CALL) {
+		txn_lua_call(txn, data);
+	} else {
+		txn_prepare_ro(txn, data);
+	}
+}
+
+static void
+txn_prepare_lrw(struct box_txn *txn, struct tbuf *data)
+{
+	if (txn->op == CALL) {
+		txn_lua_call(txn, data);
+	} else {
+		txn_prepare_rw(txn, data);
+	}
+}
+
+void
+txn_dispatch(struct box_txn *txn, u32 op, struct tbuf *data,
+	     void (*dispatcher)(struct box_txn *txn, struct tbuf *data))
+{
+	ev_tstamp start = ev_now();
+	stat_collect(stat_base, op, 1);
+
+	@try {
+		txn_set_op(txn, op, data);
+		dispatcher(txn, data);
+		txn_commit(txn);
+	}
+	@catch (id e) {
+		txn_rollback(txn);
+		@throw;
+	}
+	@finally {
+		ev_tstamp stop = ev_now();
+		if (stop - start > cfg.too_long_threshold)
+			say_warn("too long %s: %.3f sec", messages_strs[op], stop - start);
+	}
+}
+
+static struct box_txn *
+txn_begin_default(void)
+{
+	struct box_txn *txn = in_txn();
+	if (txn == NULL) {
+		txn = txn_begin();
+		txn->flags |= BOX_GC_TXN;
+		txn->out = &box_out_iproto;
+	}
+	return txn;
+}
+
+void
+txn_process_ro(u32 op, struct tbuf *data)
+{
+	struct box_txn *txn = txn_begin_default();
+	txn_dispatch(txn, op, data, txn_prepare_ro);
+}
+
+void
+txn_process_rw(u32 op, struct tbuf *data)
+{
+	struct box_txn *txn = txn_begin_default();
+	txn_dispatch(txn, op, data, txn_prepare_rw);
+}
+
+void
+txn_process_lro(u32 op, struct tbuf *data)
+{
+	struct box_txn *txn = txn_begin_default();
+	txn_dispatch(txn, op, data, txn_prepare_lro);
+}
+
+void
+txn_process_lrw(u32 op, struct tbuf *data)
+{
+	struct box_txn *txn = txn_begin_default();
+	txn_dispatch(txn, op, data, txn_prepare_lrw);
 }
 
 static int
@@ -1548,49 +1697,6 @@ build_indexes(void)
 	}
 }
 
-static void
-box_process_rw(u32 op, struct tbuf *request_data)
-{
-	ev_tstamp start = ev_now(), stop;
-
-	stat_collect(stat_base, op, 1);
-
-	struct box_txn *txn = in_txn();
-	if (txn == NULL) {
-		txn = txn_begin();
-		txn->flags |= BOX_GC_TXN;
-		txn->out = &box_out_iproto;
-	}
-
-	@try {
-		txn_set_op(txn, op, request_data);
-		box_dispatch(txn, request_data);
-		txn_commit(txn);
-	}
-	@catch (id e) {
-		txn_rollback(txn);
-		@throw;
-	}
-	@finally {
-		stop = ev_now();
-		if (stop - start > cfg.too_long_threshold)
-			say_warn("too long %s: %.3f sec", messages_strs[op], stop - start);
-	}
-}
-
-static void
-box_process_ro(u32 op, struct tbuf *request_data)
-{
-	if (!op_is_select(op)) {
-		struct box_txn *txn = in_txn();
-		if (txn != NULL)
-			txn_rollback(txn);
-		tnt_raise(LoggedError, :ER_NONMASTER);
-	}
-
-	return box_process_rw(op, request_data);
-}
-
 static struct tbuf *
 convert_snap_row_to_wal(struct tbuf *t)
 {
@@ -1631,7 +1737,7 @@ recover_row(struct recovery_state *r __attribute__((unused)), struct tbuf *t)
 	txn->out = &box_out_quiet;
 
 	@try {
-		box_process_rw(op, t);
+		txn_process_rw(op, t);
 	}
 	@catch (id e) {
 		return -1;
@@ -1670,7 +1776,8 @@ static void
 box_enter_master_or_replica_mode(struct tarantool_cfg *conf)
 {
 	if (conf->replication_source != NULL) {
-		rw_callback = box_process_ro;
+		rw_callback = txn_process_ro;
+		lrw_callback = txn_process_lro;
 
 		recovery_wait_lsn(recovery_state, recovery_state->lsn);
 		recovery_follow_remote(recovery_state, conf->replication_source);
@@ -1679,7 +1786,8 @@ box_enter_master_or_replica_mode(struct tarantool_cfg *conf)
 			 conf->replication_source, custom_proc_title);
 		title("replica/%s%s", conf->replication_source, custom_proc_title);
 	} else {
-		rw_callback = box_process_rw;
+		rw_callback = txn_process_rw;
+		lrw_callback = txn_process_lrw;
 
 		memcached_start_expire();
 
@@ -1977,7 +2085,7 @@ mod_free(void)
 void
 mod_init(void)
 {
-	static iproto_callback ro_callback = box_process_ro;
+	static iproto_callback lro_callback = txn_process_lro;
 
 	title("loading");
 	atexit(mod_free);
@@ -2032,13 +2140,13 @@ mod_init(void)
 	if (cfg.primary_port != 0)
 		fiber_server("primary", cfg.primary_port,
 			     (fiber_server_callback) iproto_interact,
-			     &rw_callback, box_leave_local_standby_mode);
+			     &lrw_callback, box_leave_local_standby_mode);
 
 	/* run secondary server */
 	if (cfg.secondary_port != 0)
 		fiber_server("secondary", cfg.secondary_port,
 			     (fiber_server_callback) iproto_interact,
-			     &ro_callback, NULL);
+			     &lro_callback, NULL);
 
 	/* run memcached server */
 	if (cfg.memcached_port != 0)

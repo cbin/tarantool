@@ -94,7 +94,6 @@ struct box_txn {
 	u16 op;
 	u32 flags;
 
-	struct lua_State *L;
 	struct box_out *out;
 	struct space *space;
 	Index *index;
@@ -163,6 +162,7 @@ ENUM(messages, MESSAGES);
 ENUM(update_op_codes, UPDATE_OP_CODES);
 
 extern iproto_callback rw_callback;
+extern iproto_callback lrw_callback;
 
 /**
  * Get space ordinal number.
@@ -202,6 +202,10 @@ index_is_primary(Index *index)
 /* These are used to implement memcached 'GET' */
 static inline struct box_txn *in_txn() { return fiber->mod_data.txn; }
 struct box_txn *txn_begin();
+void txn_process_ro(u32 op, struct tbuf *data);
+void txn_process_rw(u32 op, struct tbuf *data);
+void txn_process_lro(u32 op, struct tbuf *data);
+void txn_process_lrw(u32 op, struct tbuf *data);
 void txn_commit(struct box_txn *txn);
 void txn_rollback(struct box_txn *txn);
 void tuple_txn_ref(struct box_txn *txn, struct box_tuple *tuple);
