@@ -99,10 +99,7 @@ struct fiber {
 	void *f_data;
 	/* Store execution context in a fiber. */
 	union {
-		struct {
-			struct box_txn *txn;
-			struct lua_State *L;
-		};
+		struct box_txn *txn;
 	} mod_data;
 
 	u64 cookie;

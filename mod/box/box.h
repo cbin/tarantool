@@ -28,6 +28,7 @@
 
 #include <mod/box/index.h>
 #include "exception.h"
+#include "txnport.h"
 #include "iproto.h"
 #include <tbuf.h>
 #include <fiber.h>
@@ -82,19 +83,11 @@ struct space {
 
 extern struct space *space;
 
-struct box_out {
-	void (*add_u32)(u32 *u32);
-	void (*dup_u32)(u32 u32);
-	void (*add_tuple)(struct box_tuple *tuple);
-};
-
-extern struct box_out box_out_quiet;
-
 struct box_txn {
 	u16 op;
 	u32 flags;
 
-	struct box_out *out;
+	TxnPort *out;
 	struct space *space;
 	Index *index;
 

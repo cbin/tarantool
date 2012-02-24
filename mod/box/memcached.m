@@ -102,7 +102,7 @@ store(void *key, u32 exptime, u32 flags, u32 bytes, u8 *data)
 		  key_len, key_len, (u8 *)key, exptime, flags, cas);
 
 	struct box_txn *txn = txn_begin();
-	txn->out = &box_out_quiet;
+	txn->out = [TxnPort new];
 	/*
 	 * Use a box dispatch wrapper which handles correctly
 	 * read-only/read-write modes.
@@ -123,7 +123,7 @@ delete(void *key)
 	tbuf_append_field(req, key);
 
 	struct box_txn *txn = txn_begin();
-	txn->out = &box_out_quiet;
+	txn->out = [TxnPort new];
 
 	lrw_callback(DELETE, req);
 }

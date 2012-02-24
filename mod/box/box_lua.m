@@ -572,8 +572,25 @@ iov_add_multret(struct lua_State *L)
 		iov_add_ret(L, i);
 }
 
-static void
-box_lua_dup_u32(u32 u32 __attribute__((unused)))
+@interface TxnLuaPort: TxnOutPort {
+@public
+	struct lua_State *L;
+}
+
+- (id) init: (struct lua_State *) l;
+
+@end
+
+@implementation TxnLuaPort
+
+- (id) init: (struct lua_State *) l
+{
+	self = [super init];
+	self->L = l;
+	return self;
+}
+
+- (void) dup_u32: (u32) u32
 {
 	/*
 	 * Do nothing -- the only u32 Box can give us is
@@ -581,26 +598,21 @@ box_lua_dup_u32(u32 u32 __attribute__((unused)))
 	 * everything into Lua stack first.
 	 * @sa iov_add_multret
 	 */
+	(void) u32;
 }
 
-static void
-box_lua_add_u32(u32 *p_u32 __attribute__((unused)))
+- (void) add_u32: (u32 *) pu32
 {
-	/* See the comment in box_lua_dup_u32. */
+	/* See the comment in dup_u32. */
+	(void) pu32;
 }
 
-static void
-box_lua_add_tuple(struct box_tuple *tuple)
+- (void) add_tuple: (struct box_tuple *) tuple
 {
-	struct lua_State *L = fiber->mod_data.L;
 	lbox_pushtuple(L, tuple);
 }
 
-static struct box_out box_out_lua = {
-	box_lua_add_u32,
-	box_lua_dup_u32,
-	box_lua_add_tuple
-};
+@end
 
 /* }}} */
 
@@ -610,8 +622,11 @@ txn_enter_lua(lua_State *L)
 	struct box_txn *old_txn = in_txn();
 	fiber->mod_data.txn = NULL;
 	struct box_txn *txn = fiber->mod_data.txn = txn_begin();
-	txn->out = &box_out_lua;
-	fiber->mod_data.L = L;
+
+	TxnLuaPort *out = [TxnLuaPort alloc];
+	[out init: L];
+	txn->out = out;
+
 	return old_txn;
 }
 
