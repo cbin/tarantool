@@ -56,7 +56,6 @@ void txn_prepare_rw(struct box_txn *txn, struct tbuf *data);
 
 void txn_commit(struct box_txn *txn);
 void txn_rollback(struct box_txn *txn);
-void txn_cleanup(struct box_txn *txn);
 
 void tuple_txn_ref(struct box_txn *txn, struct box_tuple *tuple);
 void lock_tuple(struct box_txn *txn, struct box_tuple *tuple);

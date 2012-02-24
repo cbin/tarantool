@@ -237,11 +237,11 @@ txn_prepare_rw(struct box_txn *txn, struct tbuf *data)
 	}
 }
 
-void
+static void
 txn_cleanup(struct box_txn *txn)
 {
 	struct box_tuple **tuple = txn->ref_tuples->data;
-	int i = txn->ref_tuples->size / sizeof(struct box_txn *);
+	int i = txn->ref_tuples->size / sizeof(struct box_tuple *);
 
 	while (i-- > 0) {
 		say_debug("tuple_txn_unref(%p)", *tuple);

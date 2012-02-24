@@ -737,7 +737,7 @@ static void
 lua_cleanup(struct box_lua_ctx *ctx)
 {
 	struct box_tuple **tuple = ctx->ref_tuples->data;
-	int i = ctx->ref_tuples->size / sizeof(struct box_txn *);
+	int i = ctx->ref_tuples->size / sizeof(struct box_tuple *);
 
 	while (i-- > 0) {
 		say_debug("box_lua_ctx unref(%p)", *tuple);
@@ -745,7 +745,7 @@ lua_cleanup(struct box_lua_ctx *ctx)
 	}
 }
 
-struct box_lua_ctx *
+static struct box_lua_ctx *
 alloc_ctx(void)
 {
 	struct box_lua_ctx *ctx = p0alloc(fiber->gc_pool, sizeof(*ctx));
