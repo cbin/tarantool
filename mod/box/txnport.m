@@ -24,6 +24,7 @@
  */
 
 #include "box.h"
+#include "txn.h"
 #include "tuple.h"
 #include "box_lua.h"
 #include <fiber.h>

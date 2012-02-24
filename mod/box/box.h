@@ -28,12 +28,10 @@
 
 #include <mod/box/index.h>
 #include "exception.h"
-#include "txnport.h"
 #include "iproto.h"
 #include <tbuf.h>
 #include <fiber.h>
 
-struct tarantool_cfg;
 struct box_tuple;
 
 enum
@@ -83,23 +81,6 @@ struct space {
 
 extern struct space *space;
 
-struct box_txn {
-	u16 op;
-	u32 flags;
-
-	TxnPort *out;
-	struct space *space;
-	Index *index;
-
-	struct tbuf *ref_tuples;
-	struct box_tuple *old_tuple;
-	struct box_tuple *tuple;
-	struct box_tuple *lock_tuple;
-
-	struct tbuf req;
-};
-
-
 #define BOX_RETURN_TUPLE		0x01
 #define BOX_ADD				0x02
 #define BOX_REPLACE			0x04
@@ -139,6 +120,7 @@ struct box_txn {
 	_(CALL, 22)
 
 ENUM(messages, MESSAGES);
+extern const char *messages_strs[];
 
 /** UPDATE operation codes. */
 #define UPDATE_OP_CODES(_)			\
@@ -156,6 +138,8 @@ ENUM(update_op_codes, UPDATE_OP_CODES);
 
 extern iproto_callback rw_callback;
 extern iproto_callback lrw_callback;
+
+extern bool secondary_indexes_enabled;
 
 /**
  * Get space ordinal number.
@@ -186,21 +170,38 @@ index_n(Index *index)
 	return key_def_n(index->space, index->key_def);
 }
 
+/**
+ * Check if the index is primary.
+ */
 static inline bool
 index_is_primary(Index *index)
 {
 	return index_n(index) == 0;
 }
 
+/**
+ * Get active index count.
+ */
+static inline int
+index_count(struct space *sp)
+{
+	if (!secondary_indexes_enabled) {
+		/* If the secondary indexes are not enabled yet
+		   then we can use only the primary index. So
+		   return 1 if there is at least one index (which
+		   must be primary) and return 0 otherwise. */
+		return sp->key_count > 0;
+	} else {
+		/* Return the actual number of indexes. */
+		return sp->key_count;
+	}
+}
+
 /* These are used to implement memcached 'GET' */
-static inline struct box_txn *in_txn() { return fiber->mod_data.txn; }
-struct box_txn *txn_begin();
-void txn_process_ro(u32 op, struct tbuf *data);
-void txn_process_rw(u32 op, struct tbuf *data);
-void txn_process_lro(u32 op, struct tbuf *data);
-void txn_process_lrw(u32 op, struct tbuf *data);
-void txn_commit(struct box_txn *txn);
-void txn_rollback(struct box_txn *txn);
-void tuple_txn_ref(struct box_txn *txn, struct box_tuple *tuple);
+void box_process_ro(u32 op, struct tbuf *data);
+void box_process_rw(u32 op, struct tbuf *data);
+void box_process_lro(u32 op, struct tbuf *data);
+void box_process_lrw(u32 op, struct tbuf *data);
+void box_check_request_time(u32 op, ev_tstamp start, ev_tstamp stop);
 
 #endif /* TARANTOOL_BOX_H_INCLUDED */

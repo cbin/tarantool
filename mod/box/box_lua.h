@@ -37,7 +37,7 @@ struct box_txn;
  * Invoke a Lua stored procedure from the binary protocol
  * (implementation of 'CALL' command code).
  */
-void box_lua_call(struct box_txn *txn, struct tbuf *req);
+void box_lua_call(struct tbuf *req);
 /**
  * Create an instance of Lua interpreter in box.
  */

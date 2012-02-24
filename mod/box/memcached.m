@@ -25,6 +25,7 @@
  */
 #include "tarantool.h"
 #include "box.h"
+#include "txn.h"
 #include "mod/box/tuple.h"
 #include "fiber.h"
 #include "cfg/warning.h"

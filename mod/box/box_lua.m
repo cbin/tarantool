@@ -31,6 +31,7 @@
 #include "box_lua.h"
 #include "tarantool.h"
 #include "box.h"
+#include "txn.h"
 
 #include "lua.h"
 #include "lauxlib.h"
@@ -39,6 +40,15 @@
 #include "pickle.h"
 #include "tuple.h"
 #include "salloc.h"
+
+struct box_lua_ctx
+{
+	u32 flags;
+	lua_State *L;
+	int coro_ref;
+	struct tbuf *ref_tuples;
+	bool ok;
+};
 
 /* contents of box.lua */
 extern const char _binary_box_lua_start;
@@ -69,6 +79,14 @@ lua_State *root_L;
  */
 
 static const char *tuplelib_name = "box.tuple";
+
+static void
+lua_tuple_ref(struct box_lua_ctx *ctx, struct box_tuple *tuple)
+{
+	say_debug("lua_tuple_ref(%p)", tuple);
+	tbuf_append(ctx->ref_tuples, &tuple, sizeof(struct box_tuple *));
+	tuple_ref(tuple, +1);
+}
 
 static inline struct box_tuple *
 lua_checktuple(struct lua_State *L, int narg)
@@ -551,7 +569,7 @@ void iov_add_ret(struct lua_State *L, int index)
 		tnt_raise(ClientError, :ER_PROC_RET, lua_typename(L, type));
 		break;
 	}
-	tuple_txn_ref(in_txn(), tuple);
+	lua_tuple_ref(fiber->mod_data.ctx, tuple);
 	iov_add(&tuple->bsize, tuple_len(tuple));
 }
 
@@ -715,37 +733,86 @@ box_lua_panic(struct lua_State *L)
 	return 0;
 }
 
+static void
+lua_cleanup(struct box_lua_ctx *ctx)
+{
+	struct box_tuple **tuple = ctx->ref_tuples->data;
+	int i = ctx->ref_tuples->size / sizeof(struct box_txn *);
+
+	while (i-- > 0) {
+		say_debug("box_lua_ctx unref(%p)", *tuple);
+		tuple_ref(*tuple++, -1);
+	}
+}
+
+struct box_lua_ctx *
+alloc_ctx(void)
+{
+	struct box_lua_ctx *ctx = p0alloc(fiber->gc_pool, sizeof(*ctx));
+	ctx->ref_tuples = tbuf_alloc(fiber->gc_pool);
+	assert(fiber->mod_data.ctx == NULL);
+	fiber->mod_data.ctx = ctx;
+	return ctx;
+}
+
+static void
+enter_ctx(struct box_lua_ctx *ctx, struct tbuf *data)
+{
+	ctx->flags |= read_u32(data);
+	ctx->flags &= BOX_ALLOWED_REQUEST_FLAGS;
+
+	ctx->L = lua_newthread(root_L);
+	ctx->coro_ref = luaL_ref(root_L, LUA_REGISTRYINDEX);
+}
+
+static void
+leave_ctx(struct box_lua_ctx *ctx)
+{
+	/*
+	 * Allow the used coro to be garbage collected.
+	 * @todo: cache and reuse it instead.
+	 */
+	luaL_unref(root_L, LUA_REGISTRYINDEX, ctx->coro_ref);
+	fiber->mod_data.txn = 0;
+
+	if (ctx->ok) {
+		fiber_register_cleanup((fiber_cleanup_handler)lua_cleanup, ctx);
+	} else {
+		lua_cleanup(ctx);
+	}
+}
+
 /**
  * Invoke a Lua stored procedure from the binary protocol
  * (implementation of 'CALL' command code).
  */
-void box_lua_call(struct box_txn *txn __attribute__((unused)),
-		  struct tbuf *data)
+void
+box_lua_call(struct tbuf *data)
 {
-	lua_State *L = lua_newthread(root_L);
-	int coro_ref = luaL_ref(root_L, LUA_REGISTRYINDEX);
-
+	ev_tstamp start = ev_now();
+	struct box_lua_ctx *ctx = alloc_ctx();
 	@try {
+		enter_ctx(ctx, data);
+
 		u32 field_len = read_varint32(data);
 		void *field = read_str(data, field_len); /* proc name */
-		box_lua_find(L, field, field + field_len);
+		box_lua_find(ctx->L, field, field + field_len);
 		/* Push the rest of args (a tuple). */
 		u32 nargs = read_u32(data);
-		luaL_checkstack(L, nargs, "call: out of stack");
+		luaL_checkstack(ctx->L, nargs, "call: out of stack");
 		for (int i = 0; i < nargs; i++) {
 			field_len = read_varint32(data);
 			field = read_str(data, field_len);
-			lua_pushlstring(L, field, field_len);
+			lua_pushlstring(ctx->L, field, field_len);
 		}
-		lua_call(L, nargs, LUA_MULTRET);
+		lua_call(ctx->L, nargs, LUA_MULTRET);
 		/* Send results of the called procedure to the client. */
-		iov_add_multret(L);
+		iov_add_multret(ctx->L);
+
+		ctx->ok = true;
 	} @finally {
-		/*
-		 * Allow the used coro to be garbage collected.
-		 * @todo: cache and reuse it instead.
-		 */
-		luaL_unref(root_L, LUA_REGISTRYINDEX, coro_ref);
+		leave_ctx(ctx);
+		box_check_request_time(CALL, start, ev_now());
 	}
 }
 
