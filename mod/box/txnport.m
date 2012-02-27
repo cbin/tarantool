@@ -103,7 +103,6 @@ const int BOX_REF_THRESHOLD = 8196;
 	size_t len = tuple_len(tuple);
 
 	if (len > BOX_REF_THRESHOLD) {
-		tuple_txn_ref(in_txn(), tuple);
 		iov_add(&tuple->bsize, len);
 	} else {
 		iov_dup(&tuple->bsize, len);

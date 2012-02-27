@@ -639,11 +639,10 @@ txn_enter_lua(lua_State *L)
 {
 	struct box_txn *old_txn = in_txn();
 	fiber->mod_data.txn = NULL;
-	struct box_txn *txn = fiber->mod_data.txn = txn_begin();
 
 	TxnLuaPort *out = [TxnLuaPort alloc];
 	[out init: L];
-	txn->out = out;
+	txn_begin(0, out);
 
 	return old_txn;
 }

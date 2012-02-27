@@ -53,33 +53,34 @@ unlock_tuples(struct box_txn *txn)
 	}
 }
 
-void
-tuple_txn_ref(struct box_txn *txn, struct box_tuple *tuple)
+static struct box_txn *
+txn_alloc(void)
 {
-	say_debug("tuple_txn_ref(%p)", tuple);
-	tbuf_append(txn->ref_tuples, &tuple, sizeof(struct box_tuple *));
-	tuple_ref(tuple, +1);
-}
-
-struct box_txn *
-txn_begin(void)
-{
-	struct box_txn *txn = p0alloc(fiber->gc_pool, sizeof(*txn));
-	txn->ref_tuples = tbuf_alloc(fiber->gc_pool);
-	assert(fiber->mod_data.txn == NULL);
-	fiber->mod_data.txn = txn;
+	// TODO: slab or malloc & cache manually
+	struct box_txn *txn = malloc(sizeof(struct box_txn));
+	if (txn == NULL) {
+		panic("can't allocate txn");
+	}
+	memset(txn, 0, sizeof(struct box_txn));
 	return txn;
 }
 
-struct box_txn *
-txn_begin_default(void)
+void
+txn_drop(struct box_txn *txn)
 {
-	struct box_txn *txn = in_txn();
-	if (txn == NULL) {
-		txn = txn_begin();
-		txn->flags |= BOX_GC_TXN;
-		txn->out = [TxnOutPort new];
-	}
+	free(txn);
+}
+
+struct box_txn *
+txn_begin(int flags, TxnPort *port)
+{
+	struct box_txn *txn = txn_alloc();
+	txn->flags = flags;
+	txn->out = port;
+
+	assert(fiber->mod_data.txn == NULL);
+	fiber->mod_data.txn = txn;
+
 	return txn;
 }
 
@@ -110,14 +111,14 @@ txn_set_spc_idx(struct box_txn *txn, u32 spc_n, u32 idx_n)
 	txn->index = txn->space->index[idx_n];
 }
 
-void
+static void
 txn_assign_spc(struct box_txn *txn, struct tbuf *data)
 {
 	u32 spc_n = read_u32(data);
 	txn_set_spc_idx(txn, spc_n, 0);
 }
 
-void
+static void
 txn_assign_spc_idx(struct box_txn *txn, struct tbuf *data)
 {
 	u32 spc_n = read_u32(data);
@@ -186,7 +187,7 @@ txn_prepare_replace(struct box_txn *txn, struct tbuf *data)
 	prepare_replace(txn, cardinality, data);
 }
 
-void
+static void
 txn_prepare_ro(struct box_txn *txn, struct tbuf *data)
 {
 	say_debug("txn_prepare_ro(%i)", txn->op);
@@ -208,7 +209,7 @@ txn_prepare_ro(struct box_txn *txn, struct tbuf *data)
 	}
 }
 
-void
+static void
 txn_prepare_rw(struct box_txn *txn, struct tbuf *data)
 {
 	say_debug("txn_prepare_rw(%i)", txn->op);
@@ -240,14 +241,6 @@ txn_prepare_rw(struct box_txn *txn, struct tbuf *data)
 static void
 txn_cleanup(struct box_txn *txn)
 {
-	struct box_tuple **tuple = txn->ref_tuples->data;
-	int i = txn->ref_tuples->size / sizeof(struct box_tuple *);
-
-	while (i-- > 0) {
-		say_debug("tuple_txn_unref(%p)", *tuple);
-		tuple_ref(*tuple++, -1);
-	}
-
 	/* mark txn as clean */
 	memset(txn, 0, sizeof(*txn));
 }
@@ -318,5 +311,42 @@ txn_rollback(struct box_txn *txn)
 	}
 
 	txn_cleanup(txn);
+}
+
+static void
+txn_dispatch(u32 op, struct tbuf *data,
+	     void (*dispatcher)(struct box_txn *txn, struct tbuf *data))
+{
+	ev_tstamp start = ev_now();
+
+	struct box_txn *txn = in_txn();
+	if (txn == NULL) {
+		txn = txn_begin(BOX_GC_TXN, [TxnOutPort new]);
+	}
+
+	@try {
+		txn_set_op(txn, op, data);
+		dispatcher(txn, data);
+		txn_commit(txn);
+	}
+	@catch (id e) {
+		txn_rollback(txn);
+		@throw;
+	}
+	@finally {
+		box_check_request_time(op, start, ev_now());
+	}
+}
+
+void
+txn_process_ro(u32 op, struct tbuf *data)
+{
+	txn_dispatch(op, data, txn_prepare_ro);
+}
+
+void
+txn_process_rw(u32 op, struct tbuf *data)
+{
+	txn_dispatch(op, data, txn_prepare_rw);
 }
 

@@ -27,6 +27,7 @@
 #include "box.h"
 #include "box_lua.h"
 #include "txn.h"
+#include "txnproc.h"
 #include "tuple.h"
 #include "memcached.h"
 
@@ -81,38 +82,18 @@ box_check_request_time(u32 op, ev_tstamp start, ev_tstamp stop)
 		say_warn("too long %s: %.3f sec", messages_strs[op], stop - start);
 }
 
-static void
-box_dispatch(u32 op, struct tbuf *data,
-	     void (*dispatcher)(struct box_txn *txn, struct tbuf *data))
-{
-	ev_tstamp start = ev_now();
-	struct box_txn *txn = txn_begin_default();
-	@try {
-		txn_set_op(txn, op, data);
-		dispatcher(txn, data);
-		txn_commit(txn);
-	}
-	@catch (id e) {
-		txn_rollback(txn);
-		@throw;
-	}
-	@finally {
-		box_check_request_time(op, start, ev_now());
-	}
-}
-
 void
 box_process_ro(u32 op, struct tbuf *data)
 {
 	stat_collect(stat_base, op, 1);
-	box_dispatch(op, data, txn_prepare_ro);
+	txn_process_ro(op, data);
 }
 
 void
 box_process_rw(u32 op, struct tbuf *data)
 {
 	stat_collect(stat_base, op, 1);
-	box_dispatch(op, data, txn_prepare_rw);
+	txn_process_rw(op, data);
 }
 
 void
@@ -518,10 +499,7 @@ recover_row(struct recovery_state *r __attribute__((unused)), struct tbuf *t)
 
 	u16 op = read_u16(t);
 
-	struct box_txn *txn = txn_begin();
-	txn->flags |= BOX_NOT_STORE;
-	txn->out = [TxnPort new];
-
+	txn_begin(BOX_NOT_STORE, [TxnPort new]);
 	@try {
 		box_process_rw(op, t);
 	}
@@ -905,6 +883,9 @@ mod_init(void)
 	recover(recovery_state, 0);
 	stat_cleanup(stat_base, messages_MAX);
 
+	tp_init();
+	tp_start();
+
 	title("building indexes");
 
 	/* build secondary indexes */
@@ -998,6 +979,8 @@ mod_info(struct tbuf *out)
 	tbuf_printf(out, "  recovery_last_update: %.3f" CRLF,
 		    recovery_state->recovery_last_update_tstamp);
 	tbuf_printf(out, "  status: %s" CRLF, status);
+
+	tp_info(out);
 }
 
 /**

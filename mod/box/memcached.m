@@ -102,8 +102,7 @@ store(void *key, u32 exptime, u32 flags, u32 bytes, u8 *data)
 	say_debug("memcached/store key:(%i)'%.*s' exptime:%"PRIu32" flags:%"PRIu32" cas:%"PRIu64,
 		  key_len, key_len, (u8 *)key, exptime, flags, cas);
 
-	struct box_txn *txn = txn_begin();
-	txn->out = [TxnPort new];
+	txn_begin(0, [TxnPort new]);
 	/*
 	 * Use a box dispatch wrapper which handles correctly
 	 * read-only/read-write modes.
@@ -123,9 +122,7 @@ delete(void *key)
 	tbuf_append(req, &key_len, sizeof(key_len));
 	tbuf_append_field(req, key);
 
-	struct box_txn *txn = txn_begin();
-	txn->out = [TxnPort new];
-
+	txn_begin(0, [TxnPort new]);
 	rw_callback(DELETE, req);
 }
 
@@ -258,8 +255,6 @@ void memcached_get(struct box_txn *txn, size_t keys_count, struct tbuf *keys,
 		}
 		stats.get_hits++;
 		stat_collect(stat_base, MEMC_GET_HIT, 1);
-
-		tuple_txn_ref(txn, tuple);
 
 		if (show_cas) {
 			struct tbuf *b = tbuf_alloc(fiber->gc_pool);

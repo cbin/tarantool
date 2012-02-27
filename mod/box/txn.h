@@ -29,35 +29,73 @@
 #include "index.h"
 #include <fiber.h>
 
+typedef u64 box_tid;
+
+#define TXN_STATES(_) \
+	_(TXN_INITIAL, "new") \
+	_(TXN_PENDING, "pending execution") \
+	_(TXN_EXECUTING, "being executed") \
+	_(TXN_EXECUTED, "completed execution") \
+	_(TXN_LOGGING, "being logged") \
+	_(TXN_COMMITTED, "completed transaction") \
+	_(TXN_REPLYING, "sending results to client") \
+	_(TXN_FINISHED, "everything complete") \
+
+ENUM0(txn_state, TXN_STATES);
+
 struct box_txn {
+
+	/* transaction id */
+	box_tid tid;
+
+	/* transaction state */
+	enum txn_state state;
+	bool aborted;
+
+	/* request operation */
 	u16 op;
 	u32 flags;
 
-	TxnPort *out;
+	/* request attributes */
 	struct space *space;
 	Index *index;
 
-	struct tbuf *ref_tuples;
-	struct box_tuple *old_tuple;
-	struct box_tuple *tuple;
-	struct box_tuple *lock_tuple;
-
+	/* request data */
 	struct tbuf req;
+
+	/* result sink */
+	TxnPort *out;
+
+	/* the client fiber */
+	struct fiber *client;
+
+	/* transaction processing list */
+	struct box_txn *tp_next;
+	struct box_txn *tp_prev;
+
+	/* transaction cleanup list */
+	struct box_txn *cleanup_next;
+
+	/* inserted and removed tuples */
+	struct box_tuple *new_tuple;
+	struct box_tuple *old_tuple;
+
+	/* result tuple */
+	struct box_tuple *tuple;
+
+	struct box_tuple *lock_tuple;
 };
 
 static inline struct box_txn *in_txn(void) { return fiber->mod_data.txn; }
 
-struct box_txn *txn_begin(void);
-struct box_txn *txn_begin_default(void);
+struct box_txn *txn_begin(int flags, TxnPort *port);
 void txn_set_op(struct box_txn *txn, u16 op, struct tbuf *data);
-
-void txn_prepare_ro(struct box_txn *txn, struct tbuf *data);
-void txn_prepare_rw(struct box_txn *txn, struct tbuf *data);
-
+void txn_process_ro(u32 op, struct tbuf *data);
+void txn_process_rw(u32 op, struct tbuf *data);
 void txn_commit(struct box_txn *txn);
 void txn_rollback(struct box_txn *txn);
+void txn_drop(struct box_txn *txn);
 
-void tuple_txn_ref(struct box_txn *txn, struct box_tuple *tuple);
 void lock_tuple(struct box_txn *txn, struct box_tuple *tuple);
 void unlock_tuples(struct box_txn *txn);
 
