@@ -108,7 +108,7 @@ store(void *key, u32 exptime, u32 flags, u32 bytes, u8 *data)
 	 * Use a box dispatch wrapper which handles correctly
 	 * read-only/read-write modes.
 	 */
-	lrw_callback(REPLACE, req);
+	rw_callback(REPLACE, req);
 }
 
 static void
@@ -126,7 +126,7 @@ delete(void *key)
 	struct box_txn *txn = txn_begin();
 	txn->out = [TxnPort new];
 
-	lrw_callback(DELETE, req);
+	rw_callback(DELETE, req);
 }
 
 static struct box_tuple *
