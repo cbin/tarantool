@@ -86,6 +86,9 @@ struct box_txn {
 	/* inserted and removed tuples */
 	struct box_tuple *new_tuple;
 	struct box_tuple *old_tuple;
+
+	/* transaction LSN */
+	u64 lsn;
 };
 
 static inline struct box_txn *in_txn(void) { return fiber->mod_data.txn; }
@@ -101,8 +104,5 @@ void txn_process_rw(u32 op, struct tbuf *data);
 void txn_commit(struct box_txn *txn);
 void txn_rollback(struct box_txn *txn);
 void txn_drop(struct box_txn *txn);
-
-void lock_tuple(struct box_txn *txn, struct box_tuple *tuple);
-void unlock_tuples(struct box_txn *txn);
 
 #endif /* TARANTOOL_TXN_H_INCLUDED */

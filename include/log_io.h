@@ -141,6 +141,12 @@ struct row_v11 {
 	u8 data[];
 } __attribute__((packed));
 
+static inline struct wal_write_request *
+wal_write_request(const struct tbuf *t)
+{
+	return t->data;
+}
+
 static inline struct row_v11 *row_v11(const struct tbuf *t)
 {
 	return (struct row_v11 *)t->data;

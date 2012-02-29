@@ -1185,12 +1185,6 @@ recover_finalize(struct recovery_state *r)
 	}
 }
 
-static struct wal_write_request *
-wal_write_request(const struct tbuf *t)
-{
-	return t->data;
-}
-
 static struct tbuf *
 write_to_disk(void *_state, struct tbuf *t)
 {

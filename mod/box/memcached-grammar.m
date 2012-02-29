@@ -1037,7 +1037,7 @@ tr195:
 				memcached_get(txn, keys_count, keys, show_cas);
 				// TODO: was txn_commit(txn);
 			} @catch (ClientError *e) {
-				txn_rollback(txn);
+				// TODO: was txn_rollback(txn);
 				iov_reset();
 				iov_add("SERVER_ERROR ", 13);
 				iov_add(e->errmsg, strlen(e->errmsg));

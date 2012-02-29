@@ -68,6 +68,10 @@ struct ring {
 	struct msg *ring[];
 };
 
+struct fiber;
+
+typedef void (*message_callback)(struct fiber *target, u8 *msg, u32 msg_len);
+
 struct fiber {
 	ev_io io;
 	ev_async async;
@@ -111,6 +115,7 @@ struct fiber {
 	u32 flags;
 
 	struct fiber *waiter;
+	message_callback message_cb;
 };
 
 SLIST_HEAD(, fiber) fibers, zombie_fibers;
@@ -191,6 +196,7 @@ ssize_t iov_flush(void);
 void iov_reset();
 
 bool write_inbox(struct fiber *recipient, struct tbuf *msg);
+bool write_inbox_redirected(struct fiber *redirect, struct fiber *recipient, struct tbuf *msg);
 int inbox_size(struct fiber *recipient);
 void wait_inbox(struct fiber *recipient);
 

@@ -654,15 +654,17 @@ wait_inbox(struct fiber *recipient)
 	}
 }
 
+
 bool
-write_inbox(struct fiber *recipient, struct tbuf *msg)
+write_inbox_redirected(struct fiber *redirect, struct fiber *recipient,
+		       struct tbuf *msg)
 {
 	struct ring *inbox = recipient->inbox;
 	if (ring_size(inbox) == inbox->size - 1)
 		return false;
 
 	inbox->ring[inbox->head] = palloc(recipient->gc_pool, sizeof(struct msg));
-	inbox->ring[inbox->head]->sender_fid = fiber->fid;
+	inbox->ring[inbox->head]->sender_fid = redirect->fid;
 	inbox->ring[inbox->head]->msg = tbuf_clone(recipient->gc_pool, msg);
 	inbox->head = (inbox->head + 1) % inbox->size;
 
@@ -671,6 +673,11 @@ write_inbox(struct fiber *recipient, struct tbuf *msg)
 	return true;
 }
 
+bool
+write_inbox(struct fiber *recipient, struct tbuf *msg)
+{
+	return write_inbox_redirected(fiber, recipient, msg);
+}
 
 /**
  * @note: this is a cancellation point (@sa fiber_testcancel())
@@ -1051,9 +1058,16 @@ sock2inbox(void *_data __attribute__((unused)))
 			continue;
 		}
 
-		msg_body = tbuf_alloc(recipient->gc_pool);
-		tbuf_append(msg_body, fiber_msg(msg)->data, fiber_msg(msg)->data_len);
-		write_inbox(recipient, msg_body);
+		if (recipient->message_cb != NULL) {
+			recipient->message_cb(recipient,
+					      fiber_msg(msg)->data,
+					      fiber_msg(msg)->data_len);
+		} else {
+			msg_body = tbuf_alloc(recipient->gc_pool);
+			tbuf_append(msg_body, fiber_msg(msg)->data, fiber_msg(msg)->data_len);
+			write_inbox(recipient, msg_body);
+		}
+
 		fiber_gc();
 	}
 }
