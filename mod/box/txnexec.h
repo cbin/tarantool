@@ -1,5 +1,5 @@
-#ifndef TARANTOOL_UPDATE_H_INCLUDED
-#define TARANTOOL_UPDATE_H_INCLUDED
+#ifndef TARANTOOL_TXNEXEC_H_INCLUDED
+#define TARANTOOL_TXNEXEC_H_INCLUDED
 /*
  * Copyright (C) 2012 Mail.RU
  *
@@ -25,17 +25,15 @@
  * SUCH DAMAGE.
  */
 
-#include <stddef.h>
-
 struct box_txn;
-struct tbuf;
-struct update_cmd;
+struct box_tuple;
 
-struct update_cmd *parse_update_cmd(struct tbuf *data);
-void init_update_operations(struct box_txn *txn, struct update_cmd *cmd);
-void *get_update_key(struct update_cmd *cmd);
-size_t get_update_tuple_len(struct update_cmd *cmd);
-void do_update(struct box_txn *txn, struct update_cmd *cmd);
+void txn_execute_select(struct box_txn *txn);
+void txn_execute_delete(struct box_txn *txn);
+void txn_execute_update(struct box_txn *txn);
+void txn_execute_replace(struct box_txn *txn);
+void txn_rollback_indexes(struct box_txn *txn,
+			  struct box_tuple *failed_tuple,
+			  struct box_tuple *backup_tuple);
 
-#endif /* TARANTOOL_UPDATE_H_INCLUDED */
-
+#endif /* TARANTOOL_TXNEXEC_H_INCLUDED */

@@ -387,7 +387,9 @@ fiber_alloc(struct fiber *fiber)
 }
 
 void
-fiber_register_cleanup(fiber_cleanup_handler handler, void *data)
+fiber_register_cleanup(struct fiber *fiber,
+		       fiber_cleanup_handler handler,
+		       void *data)
 {
 	struct fiber_cleanup i;
 	i.handler = handler;

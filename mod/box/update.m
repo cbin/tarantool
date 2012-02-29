@@ -588,7 +588,7 @@ get_update_key(struct update_cmd *cmd)
 	return cmd->key;
 }
 
-u32
+size_t
 get_update_tuple_len(struct update_cmd *cmd)
 {
 	return cmd->new_tuple_len;

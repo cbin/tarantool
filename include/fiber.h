@@ -126,7 +126,7 @@ static inline struct iovec *iovec(const struct tbuf *t)
 }
 
 typedef void (*fiber_cleanup_handler) (void *);
-void fiber_register_cleanup(fiber_cleanup_handler handler, void *data);
+void fiber_register_cleanup(struct fiber *fiber, fiber_cleanup_handler handler, void *data);
 
 extern struct fiber *fiber;
 

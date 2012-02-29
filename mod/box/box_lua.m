@@ -775,7 +775,9 @@ leave_ctx(struct box_lua_ctx *ctx)
 	fiber->mod_data.txn = 0;
 
 	if (ctx->ok) {
-		fiber_register_cleanup((fiber_cleanup_handler)lua_cleanup, ctx);
+		fiber_register_cleanup(fiber,
+				       (fiber_cleanup_handler) lua_cleanup,
+				       ctx);
 	} else {
 		lua_cleanup(ctx);
 	}
