@@ -27,7 +27,6 @@
 #include "box.h"
 #include "box_lua.h"
 #include "txn.h"
-#include "txnproc.h"
 #include "tuple.h"
 #include "memcached.h"
 
@@ -883,8 +882,8 @@ mod_init(void)
 	recover(recovery_state, 0);
 	stat_cleanup(stat_base, messages_MAX);
 
-	tp_init();
-	tp_start();
+	txn_init();
+	txn_start();
 
 	title("building indexes");
 
@@ -980,7 +979,7 @@ mod_info(struct tbuf *out)
 		    recovery_state->recovery_last_update_tstamp);
 	tbuf_printf(out, "  status: %s" CRLF, status);
 
-	tp_info(out);
+	txn_info(out);
 }
 
 /**

@@ -1,5 +1,5 @@
-#ifndef TARANTOOL_OPS_H_INCLUDED
-#define TARANTOOL_OPS_H_INCLUDED
+#ifndef TARANTOOL_UPDATE_H_INCLUDED
+#define TARANTOOL_UPDATE_H_INCLUDED
 /*
  * Copyright (C) 2012 Mail.RU
  *
@@ -25,21 +25,15 @@
  * SUCH DAMAGE.
  */
 
-#include <util.h>
-
 struct box_txn;
 struct tbuf;
+struct update_cmd;
 
-void process_select(struct box_txn *txn, u32 limit, u32 offset, struct tbuf *data);
+struct update_cmd *parse_update_cmd(struct tbuf *data);
+void init_update_operations(struct box_txn *txn, struct update_cmd *cmd);
+void *get_update_key(struct update_cmd *cmd);
+unsigned get_update_tuple_len(struct update_cmd *cmd);
+void do_update(struct box_txn *txn, struct update_cmd *cmd);
 
-void prepare_delete(struct box_txn *txn, void *key);
-void commit_delete(struct box_txn *txn);
-
-void prepare_replace(struct box_txn *txn, size_t cardinality, struct tbuf *data);
-void commit_replace(struct box_txn *txn);
-void rollback_replace(struct box_txn *txn);
-
-void prepare_update(struct box_txn *txn, struct tbuf *data);
-
-#endif /* TARANTOOL_OPS_H_INCLUDED */
+#endif /* TARANTOOL_UPDATE_H_INCLUDED */
 

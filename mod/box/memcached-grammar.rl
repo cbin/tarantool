@@ -193,7 +193,7 @@ memcached_dispatch()
 			struct box_txn *txn = txn_begin(BOX_GC_TXN, [TxnPort new]);
 			@try {
 				memcached_get(txn, keys_count, keys, show_cas);
-				txn_commit(txn);
+				// TODO: was txn_commit(txn);
 			} @catch (ClientError *e) {
 				txn_rollback(txn);
 				iov_reset();

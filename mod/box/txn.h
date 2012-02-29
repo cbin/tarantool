@@ -35,18 +35,15 @@ typedef u64 box_tid;
 	_(TXN_INITIAL, "new") \
 	_(TXN_PENDING, "pending execution") \
 	_(TXN_EXECUTING, "being executed") \
-	_(TXN_EXECUTED, "completed execution") \
-	_(TXN_LOGGING, "being logged") \
-	_(TXN_COMMITTED, "completed transaction") \
-	_(TXN_REPLYING, "sending results to client") \
+	_(TXN_UPDATE_READY, "completed execution") \
+	_(TXN_LOGGING_UPDATE, "being logged") \
+	_(TXN_RESULT_READY, "waiting the result delivery") \
+	_(TXN_DELIVERING_RESULT, "sending results to client") \
 	_(TXN_FINISHED, "everything complete") \
 
 ENUM0(txn_state, TXN_STATES);
 
 struct box_txn {
-
-	/* transaction id */
-	box_tid tid;
 
 	/* transaction state */
 	enum txn_state state;
@@ -56,40 +53,49 @@ struct box_txn {
 	u16 op;
 	u32 flags;
 
+	/* request data */
+	struct tbuf *data;
+	void *orig_data;
+	u32 orig_size;
+
 	/* request attributes */
 	struct space *space;
 	Index *index;
 
-	/* request data */
-	struct tbuf req;
-
 	/* result sink */
 	TxnPort *out;
+
+	/* exception */
+	id exception;
+
+	/* request dispatcher */
+	void (*dispatcher)(struct box_txn *txn);
 
 	/* the client fiber */
 	struct fiber *client;
 
 	/* transaction processing list */
-	struct box_txn *tp_next;
-	struct box_txn *tp_prev;
+	struct box_txn *process_next;
+	struct box_txn *process_prev;
 
-	/* transaction cleanup list */
-	struct box_txn *cleanup_next;
+#if TXN_DELIVERY_LIST
+	/* transaction result delivery list */
+	struct box_txn *delivery_next;
+#endif
 
 	/* inserted and removed tuples */
 	struct box_tuple *new_tuple;
 	struct box_tuple *old_tuple;
-
-	/* result tuple */
-	struct box_tuple *tuple;
-
-	struct box_tuple *lock_tuple;
 };
 
 static inline struct box_txn *in_txn(void) { return fiber->mod_data.txn; }
 
+void txn_init(void);
+void txn_start(void);
+void txn_stop(void);
+void txn_info(struct tbuf *out);
+
 struct box_txn *txn_begin(int flags, TxnPort *port);
-void txn_set_op(struct box_txn *txn, u16 op, struct tbuf *data);
 void txn_process_ro(u32 op, struct tbuf *data);
 void txn_process_rw(u32 op, struct tbuf *data);
 void txn_commit(struct box_txn *txn);

@@ -23,274 +23,12 @@
  * SUCH DAMAGE.
  */
 
-#include "ops.h"
+#include "update.h"
 #include "box.h"
 #include "txn.h"
 #include "tuple.h"
 
 #include <pickle.h>
-
-/* {{{ Validation.*************************************************/
-
-static void
-validate_indexes(struct box_txn *txn)
-{
-	int n = index_count(txn->space);
-
-	/* Only secondary indexes are validated here. So check to see
-	   if there are any.*/
-	if (n <= 1) {
-		return;
-	}
-
-	/* Check to see if the tuple has a sufficient number of fields. */
-	if (txn->tuple->cardinality < txn->space->field_count)
-		tnt_raise(IllegalParams, :"tuple must have all indexed fields");
-
-	/* Sweep through the tuple and check the field sizes. */
-	u8 *data = txn->tuple->data;
-	for (int f = 0; f < txn->space->field_count; ++f) {
-		/* Get the size of the current field and advance. */
-		u32 len = load_varint32((void **) &data);
-		data += len;
-
-		/* Check fixed size fields (NUM and NUM64) and skip undefined
-		   size fields (STRING and UNKNOWN). */
-		if (txn->space->field_types[f] == NUM) {
-			if (len != sizeof(u32))
-				tnt_raise(IllegalParams, :"field must be NUM");
-		} else if (txn->space->field_types[f] == NUM64) {
-			if (len != sizeof(u64))
-				tnt_raise(IllegalParams, :"field must be NUM64");
-		}
-	}
-
-	/* Check key uniqueness */
-	for (int i = 1; i < n; ++i) {
-		Index *index = txn->space->index[i];
-		if (index->key_def->is_unique) {
-			struct box_tuple *tuple = [index findByTuple: txn->tuple];
-			if (tuple != NULL && tuple != txn->old_tuple)
-				tnt_raise(ClientError, :ER_INDEX_VIOLATION);
-		}
-	}
-}
-
-/** }}} */
-
-/* {{{ SELECT op **************************************************/
-
-void
-process_select(struct box_txn *txn, u32 limit, u32 offset, struct tbuf *data)
-{
-	struct box_tuple *tuple;
-	uint32_t *found;
-	u32 count = read_u32(data);
-	if (count == 0)
-		tnt_raise(IllegalParams, :"tuple count must be positive");
-
-	found = palloc(fiber->gc_pool, sizeof(*found));
-	[txn->out add_u32: found];
-	*found = 0;
-
-	for (u32 i = 0; i < count; i++) {
-
-		Index *index = txn->index;
-		/* End the loop if reached the limit. */
-		if (limit == *found)
-			return;
-
-		u32 key_cardinality = read_u32(data);
-
-		void *key = NULL;
-		if (key_cardinality) {
-			if (key_cardinality > index->key_def->part_count) {
-				tnt_raise(ClientError, :ER_KEY_CARDINALITY,
-					  key_cardinality,
-					  index->key_def->part_count);
-			}
-
-			key = read_field(data);
-
-			/* advance remaining fields of a key */
-			for (int i = 1; i < key_cardinality; i++)
-				read_field(data);
-		}
-
-		struct iterator *it = index->position;
-		[index initIterator: it :key :key_cardinality];
-
-		while ((tuple = it->next_equal(it)) != NULL) {
-			if (tuple->flags & GHOST)
-				continue;
-
-			if (offset > 0) {
-				offset--;
-				continue;
-			}
-
-			[txn->out add_tuple: tuple];
-
-			if (limit == ++(*found))
-				break;
-		}
-	}
-	if (data->size != 0)
-		tnt_raise(IllegalParams, :"can't unpack request");
-}
-
-/** }}} */
-
-/* {{{ DELETE op **************************************************/
-
-void
-prepare_delete(struct box_txn *txn, void *key)
-{
-	u32 tuples_affected = 0;
-
-	txn->old_tuple = [txn->index find: key];
-
-	if (txn->old_tuple == NULL)
-		/*
-		 * There is no subject tuple we could write to WAL, which means,
-		 * to do a write, we would have to allocate one. Too complicated,
-		 * for now, just do no logging for DELETEs that do nothing.
-		 */
-		txn->flags |= BOX_NOT_STORE;
-	else {
-		lock_tuple(txn, txn->old_tuple);
-
-		tuples_affected = 1;
-	}
-
-	[txn->out dup_u32: tuples_affected];
-
-	if (txn->old_tuple && (txn->flags & BOX_RETURN_TUPLE))
-		[txn->out add_tuple: txn->old_tuple];
-}
-
-void
-commit_delete(struct box_txn *txn)
-{
-	if (txn->old_tuple == NULL)
-		return;
-
-	int n = index_count(txn->space);
-	for (int i = 0; i < n; i++) {
-		Index *index = txn->space->index[i];
-		[index remove: txn->old_tuple];
-	}
-
-	tuple_ref(txn->old_tuple, -1);
-}
-
-/** }}} */
-
-/* {{{ REPLACE op *************************************************/
-
-void
-prepare_replace(struct box_txn *txn, size_t cardinality, struct tbuf *data)
-{
-	assert(data != NULL);
-	if (cardinality == 0)
-		tnt_raise(IllegalParams, :"tuple cardinality is 0");
-
-	if (data->size == 0 || data->size != valid_tuple(data, cardinality))
-		tnt_raise(IllegalParams, :"incorrect tuple length");
-
-	txn->new_tuple = tuple_alloc(data->size);
-	tuple_ref(txn->new_tuple, 1);
-	txn->tuple = txn->new_tuple;
-
-	txn->tuple->cardinality = cardinality;
-	memcpy(txn->tuple->data, data->data, data->size);
-
-	txn->old_tuple = [txn->index findByTuple: txn->tuple];
-
-	if (txn->flags & BOX_ADD && txn->old_tuple != NULL)
-		tnt_raise(ClientError, :ER_TUPLE_FOUND);
-
-	if (txn->flags & BOX_REPLACE && txn->old_tuple == NULL)
-		tnt_raise(ClientError, :ER_TUPLE_NOT_FOUND);
-
-	validate_indexes(txn);
-
-	if (txn->old_tuple != NULL) {
-#ifndef NDEBUG
-		void *ka, *kb;
-		ka = tuple_field(txn->tuple, txn->index->key_def->parts[0].fieldno);
-		kb = tuple_field(txn->old_tuple, txn->index->key_def->parts[0].fieldno);
-		int kal, kab;
-		kal = load_varint32(&ka);
-		kab = load_varint32(&kb);
-		assert(kal == kab && memcmp(ka, kb, kal) == 0);
-#endif
-		lock_tuple(txn, txn->old_tuple);
-	} else {
-		lock_tuple(txn, txn->tuple);
-		/*
-		 * Mark the tuple as ghost before attempting an
-		 * index replace: if it fails, txn_rollback() will
-		 * look at the flag and remove the tuple.
-		 */
-		txn->tuple->flags |= GHOST;
-		/*
-		 * If the tuple doesn't exist, insert a GHOST
-		 * tuple in all indices in order to avoid a race
-		 * condition when another REPLACE comes along:
-		 * a concurrent REPLACE, UPDATE, or DELETE, returns
-		 * an error when meets a ghost tuple.
-		 *
-		 * Tuple reference counter will be incremented in
-		 * txn_commit().
-		 */
-		int n = index_count(txn->space);
-		for (int i = 0; i < n; i++) {
-			Index *index = txn->space->index[i];
-			[index replace: NULL :txn->tuple];
-		}
-	}
-
-	[txn->out dup_u32: 1]; /* Affected tuples */
-
-	if (txn->flags & BOX_RETURN_TUPLE)
-		[txn->out add_tuple: txn->tuple];
-}
-
-void
-commit_replace(struct box_txn *txn)
-{
-	if (txn->old_tuple != NULL) {
-		int n = index_count(txn->space);
-		for (int i = 0; i < n; i++) {
-			Index *index = txn->space->index[i];
-			[index replace: txn->old_tuple :txn->tuple];
-		}
-
-		tuple_ref(txn->old_tuple, -1);
-	}
-
-	if (txn->tuple != NULL) {
-		txn->tuple->flags &= ~GHOST;
-		tuple_ref(txn->tuple, +1);
-	}
-}
-
-void
-rollback_replace(struct box_txn *txn)
-{
-	say_debug("rollback_replace: txn->tuple:%p", txn->tuple);
-
-	if (txn->tuple && txn->tuple->flags & GHOST) {
-		int n = index_count(txn->space);
-		for (int i = 0; i < n; i++) {
-			Index *index = txn->space->index[i];
-			[index remove: txn->tuple];
-		}
-	}
-}
-
-/** }}} */
 
 /** {{{ UPDATE request implementation.
  * UPDATE request is represented by a sequence of operations,
@@ -602,7 +340,7 @@ static struct update_op_meta update_op_meta[UPDATE_OP_MAX + 1] = {
  * update operations. Do not do too much, since the subject
  * tuple may not exist.
  */
-static struct update_cmd *
+struct update_cmd *
 parse_update_cmd(struct tbuf *data)
 {
 	struct update_cmd *cmd = palloc(fiber->gc_pool,
@@ -692,7 +430,7 @@ update_field_init(struct update_cmd *cmd, struct update_field *field,
  * We found a tuple to do the update on. Prepare and optimize
  * the operations.
  */
-static void
+void
 init_update_operations(struct box_txn *txn, struct update_cmd *cmd)
 {
 	/*
@@ -783,18 +521,18 @@ init_update_operations(struct box_txn *txn, struct update_cmd *cmd)
 	cmd->field_end = field;
 }
 
-static void
+void
 do_update(struct box_txn *txn, struct update_cmd *cmd)
 {
-	void *new_data = txn->tuple->data;
-	void *new_data_end = new_data + txn->tuple->bsize;
+	void *new_data = txn->new_tuple->data;
+	void *new_data_end = new_data + txn->new_tuple->bsize;
 	struct update_field *field;
-	txn->tuple->cardinality = 0;
+	txn->new_tuple->cardinality = 0;
 
 	for (field = cmd->field; field < cmd->field_end; field++) {
 		if (field->first < field->end) { /* -> field is not deleted. */
 			new_data = save_varint32(new_data, field->new_len);
-			txn->tuple->cardinality++;
+			txn->new_tuple->cardinality++;
 		}
 		void *new_field = new_data;
 		void *old_field = field->old;
@@ -839,47 +577,19 @@ do_update(struct box_txn *txn, struct update_cmd *cmd)
 		if (field->tail_field_count) {
 			memcpy(new_data, field->old_end, field->tail_len);
 			new_data += field->tail_len;
-			txn->tuple->cardinality += field->tail_field_count;
+			txn->new_tuple->cardinality += field->tail_field_count;
 		}
 	}
 }
 
-void
-prepare_update(struct box_txn *txn, struct tbuf *data)
+void *
+get_update_key(struct update_cmd *cmd)
 {
-	u32 tuples_affected = 1;
-
-	/* Parse UPDATE request. */
-	struct update_cmd *cmd = parse_update_cmd(data);
-
-	/* Try to find the tuple. */
-	txn->old_tuple = [txn->index find: cmd->key];
-	if (txn->old_tuple == NULL) {
-		/* Not found. For simplicity, skip the logging. */
-		txn->flags |= BOX_NOT_STORE;
-
-		tuples_affected = 0;
-
-		goto out;
-	}
-
-	init_update_operations(txn, cmd);
-
-	/* allocate new tuple */
-	txn->new_tuple = tuple_alloc(cmd->new_tuple_len);
-	tuple_ref(txn->new_tuple, 1);
-	txn->tuple = txn->new_tuple;
-
-	do_update(txn, cmd);
-
-	lock_tuple(txn, txn->old_tuple);
-	validate_indexes(txn);
-
-out:
-	[txn->out dup_u32: tuples_affected];
-
-	if (txn->flags & BOX_RETURN_TUPLE && txn->tuple)
-		[txn->out add_tuple: txn->tuple];
+	return cmd->key;
 }
 
-/** }}} */
+u32
+get_update_tuple_len(struct update_cmd *cmd)
+{
+	return cmd->new_tuple_len;
+}
