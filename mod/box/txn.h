@@ -33,10 +33,8 @@ typedef u64 box_tid;
 
 #define TXN_STATES(_) \
 	_(TXN_INITIAL, "new") \
-	_(TXN_PENDING, "pending execution") \
-	_(TXN_EXECUTING, "being executed") \
-	_(TXN_UPDATE_READY, "completed execution") \
-	_(TXN_LOGGING_UPDATE, "being logged") \
+	_(TXN_PENDING, "pending log") \
+	_(TXN_LOGGING, "being logged") \
 	_(TXN_RESULT_READY, "waiting the result delivery") \
 	_(TXN_DELIVERING_RESULT, "sending results to client") \
 	_(TXN_FINISHED, "everything complete") \
@@ -64,12 +62,6 @@ struct box_txn {
 
 	/* result sink */
 	TxnPort *out;
-
-	/* exception */
-	id exception;
-
-	/* request dispatcher */
-	void (*dispatcher)(struct box_txn *txn);
 
 	/* the client fiber */
 	struct fiber *client;

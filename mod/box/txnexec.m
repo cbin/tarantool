@@ -324,6 +324,9 @@ txn_execute_replace(struct box_txn *txn)
 	txn_result_tuple(txn, txn->new_tuple);
 }
 
+/**
+ * Execute SELECT request.
+ */
 void
 txn_execute_select(struct box_txn *txn)
 {

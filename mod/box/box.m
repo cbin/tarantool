@@ -875,15 +875,14 @@ mod_init(void)
 	/* memcached initialize */
 	memcached_init();
 
-
 	if (init_storage)
 		return;
 
-	recover(recovery_state, 0);
-	stat_cleanup(stat_base, messages_MAX);
-
 	txn_init();
 	txn_start();
+
+	recover(recovery_state, 0);
+	stat_cleanup(stat_base, messages_MAX);
 
 	title("building indexes");
 
