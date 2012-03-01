@@ -56,7 +56,7 @@ txn_requires_rollback(struct box_txn *txn)
  * Check if the executed transaction requires logging.
  */
 static bool
-txn_requires_logging(struct box_txn *txn)
+txn_requires_commit(struct box_txn *txn)
 {
 	if ((txn->flags & BOX_NOT_STORE) != 0)
 		return false;
@@ -65,13 +65,12 @@ txn_requires_logging(struct box_txn *txn)
 
 /** }}} */
 
-/* {{{ Transaction queue. *****************************************/
+/* {{{ Transaction pipeline. **************************************/
 
-/* Transaction processing pipeline. */
+/* Transaction processing queue. */
 static struct box_txn *txn_first;
 static struct box_txn *txn_last;
 static struct box_txn *txn_cptr; /* commit loop front */
-static struct box_txn *txn_eptr; /* exec loop front */
 
 #if TXN_DELIVERY_LIST
 /* Transaction result delivery list. */
@@ -81,10 +80,10 @@ static struct box_txn *txn_dptr; /* delivery loop front */
 #endif
 
 /**
- * Add transaction to the queue end.
+ * Add transaction to the commit/cleanup queue end.
  */
 static void
-txn_append(struct box_txn *txn)
+txn_queue_append(struct box_txn *txn)
 {
 	txn->process_next = NULL;
 	txn->process_prev = txn_last;
@@ -96,23 +95,17 @@ txn_append(struct box_txn *txn)
 	}
 	txn_last = txn;
 
-	if (txn_eptr == NULL) {
-		txn_eptr = txn;
-	}
 	if (txn_cptr == NULL) {
 		txn_cptr = txn;
 	}
 }
 
 /**
- * Remove transaction from the queue.
+ * Remove transaction from the commit/cleanup queue.
  */
 static void
-txn_remove(struct box_txn *txn)
+txn_queue_remove(struct box_txn *txn)
 {
-	if (txn_eptr == txn) {
-		txn_eptr = txn->process_next;
-	}
 	if (txn_cptr == txn) {
 		txn_cptr = txn->process_next;
 	}
@@ -180,11 +173,12 @@ txn_delivery_remove(struct box_txn *txn)
 
 /* {{{ Transaction processing internal routines. ******************/
 
-void
-txn_log_complete(struct box_txn *txn)
+static void
+txn_fiber_detach(struct box_txn *txn)
 {
-	assert(txn->state == TXN_LOGGING);
-	txn->state = TXN_RESULT_READY;
+	if (txn->client != NULL && txn->client->mod_data.txn == txn) {
+		txn->client->mod_data.txn = NULL;
+	}
 }
 
 static void
@@ -192,6 +186,7 @@ txn_finish(struct box_txn *txn)
 {
 	assert(txn->state == TXN_DELIVERING_RESULT);
 	txn->state = TXN_FINISHED;
+	txn_fiber_detach(txn);
 }
 
 static void
@@ -214,8 +209,6 @@ txn_deliver(struct box_txn *txn)
 static void
 txn_make_result_ready(struct box_txn *txn)
 {
-	assert(txn->state != TXN_INITIAL);
-	assert(txn->state != TXN_PENDING);
 	assert(txn->state != TXN_RESULT_READY);
 	assert(txn->state != TXN_DELIVERING_RESULT);
 	assert(txn->state != TXN_FINISHED);
@@ -228,6 +221,13 @@ txn_make_result_ready(struct box_txn *txn)
 #endif
 }
 
+void
+txn_commit_completed(struct box_txn *txn)
+{
+	assert(txn->state == TXN_LOGGING);
+	txn_make_result_ready(txn);
+}
+
 static void
 txn_abort(struct box_txn *txn)
 {
@@ -237,8 +237,6 @@ txn_abort(struct box_txn *txn)
 
 	txn->aborted = true;
 	txn_make_result_ready(txn);
-
-	// TODO: rollback
 }
 
 static void
@@ -294,7 +292,7 @@ txn_wal_write(struct box_txn *txn)
 }
 
 static void
-txn_prepare_ro(struct box_txn *txn)
+txn_dispatch_ro(struct box_txn *txn)
 {
 	say_debug("txn_prepare_ro(%i)", txn->op);
 
@@ -316,7 +314,7 @@ txn_prepare_ro(struct box_txn *txn)
 }
 
 static void
-txn_prepare_rw(struct box_txn *txn)
+txn_dispatch_rw(struct box_txn *txn)
 {
 	say_debug("txn_prepare_rw(%i)", txn->op);
 
@@ -345,7 +343,7 @@ txn_prepare_rw(struct box_txn *txn)
 }
 
 static void
-txn_log(struct box_txn *txn)
+txn_commit(struct box_txn *txn)
 {
 	assert(txn->state == TXN_PENDING);
 	@try {
@@ -353,44 +351,27 @@ txn_log(struct box_txn *txn)
 		txn_wal_write(txn);
 	}
 	@catch (id e) {
+		// TODO: rollback
 		txn_abort(txn);
 	}
 }
 
 static void
-txn_release(struct box_txn *txn)
+txn_cleanup(struct box_txn *txn)
 {
 	assert(txn->state == TXN_FINISHED);
-
-	struct box_tuple *tuple = (txn->aborted
-				   ? txn->new_tuple
-				   : txn->old_tuple);
-	if (tuple != NULL) {
-		tuple_ref(tuple, -1);
-	}
-
+	txn_release_disused(txn, txn->aborted);
 	txn_drop(txn);
 }
 
-/*
-void
+static void
 txn_rollback(struct box_txn *txn)
 {
-	assert(txn == in_txn());
-	assert(txn->op != CALL);
-
-	fiber->mod_data.txn = 0;
-	if (txn->op == 0)
-		return;
-
-	if (txn->op != SELECT) {
-		say_debug("txn_rollback(op:%s)", messages_strs[txn->op]);
-
-		if (txn->op == REPLACE)
-			txn_rollback_indexes(txn, txn->new_tuple, txn->old_tuple);
-	}
+	assert(txn->state != TXN_DELIVERING_RESULT);
+	assert(txn->state != TXN_FINISHED);
+	txn_restore_indexes(txn);
+	txn_release_disused(txn, true);
 }
-*/
 
 /** }}} */
 
@@ -427,16 +408,14 @@ txn_set_data(struct box_txn *txn, u32 op, struct tbuf *data)
 }
 
 /**
- * Add a transaction to the transaction processing queue.
+ * Wait for the transaction processing completion.
  */
 static void
-txn_queue(struct box_txn *txn)
+txn_wait_commit(struct box_txn *txn)
 {
 	assert(txn->state == TXN_INITIAL);
 
 	txn->state = TXN_PENDING;
-	txn_append(txn);
-
 	for (;;) {
 		if (txn->state == TXN_FINISHED)
 			break;
@@ -451,28 +430,40 @@ txn_queue(struct box_txn *txn)
 }
 
 /**
- * Create a transaction for a given request and initiate its processing.
+ * Process a request.
  */
 static void
 txn_process(u32 op, struct tbuf *data, void (*dispatcher)(struct box_txn *txn))
 {
 	ev_tstamp start = ev_now();
 
+	/* ensure that a transaction context is established */
 	struct box_txn *txn = in_txn();
 	if (txn == NULL) {
 		txn = txn_begin(BOX_GC_TXN, [TxnOutPort new]);
 	}
 
 	@try {
+		/* initialize the transaction */
 		txn_set_data(txn, op, data);
+
+		/* execute the transaction */
 		dispatcher(txn);
-		if (txn_requires_logging(txn)) {
-			txn_queue(txn);
+
+		/* register for commit and cleanup */
+		txn_queue_append(txn);
+
+		/* initiate commit and result delivery */
+		if (txn_requires_commit(txn)) {
+			txn_wait_commit(txn);
 		} else {
 			txn_make_result_ready(txn);
 		}
 	}
 	@catch (id e) {
+		if (txn_requires_rollback(txn)) {
+			txn_rollback(txn);
+		}
 		txn_drop(txn);
 		@throw;
 	}
@@ -514,7 +505,7 @@ txn_commit_loop(void *data __attribute__((unused)))
 		if (txn_cptr != NULL) {
 			switch(txn_cptr->state) {
 			case TXN_PENDING:
-				txn_log(txn_cptr);
+				txn_commit(txn_cptr);
 				/* fallthrough */
 			case TXN_FINISHED:
 			case TXN_DELIVERING_RESULT:
@@ -560,11 +551,9 @@ txn_cleanup_loop(void *data __attribute__((unused)))
 	for (;; txn_cleanup_cycles++) {
 
 		if (txn_first != NULL) {
-			struct box_txn *txn = txn_first;
-			switch(txn->state) {
+			switch(txn_first->state) {
 			case TXN_FINISHED:
-				txn_remove(txn); /* this advances txn_first */
-				txn_release(txn); 
+				txn_cleanup(txn_first); /* this advances txn_first */
 				continue;
 			default:
 				break;
@@ -631,7 +620,12 @@ txn_begin(int flags, TxnPort *port)
 void
 txn_drop(struct box_txn *txn)
 {
-	txn->client->mod_data.txn = NULL;
+	assert(txn->state != TXN_LOGGING);
+	assert(txn->state != TXN_DELIVERING_RESULT);
+	if (txn->state != TXN_INITIAL) {
+		txn_queue_remove(txn);
+	}
+	txn_fiber_detach(txn);
 	free(txn);
 }
 
@@ -641,7 +635,7 @@ txn_drop(struct box_txn *txn)
 void
 txn_process_ro(u32 op, struct tbuf *data)
 {
-	txn_process(op, data, txn_prepare_ro);
+	txn_process(op, data, txn_dispatch_ro);
 }
 
 /**
@@ -650,7 +644,7 @@ txn_process_ro(u32 op, struct tbuf *data)
 void
 txn_process_rw(u32 op, struct tbuf *data)
 {
-	txn_process(op, data, txn_prepare_rw);
+	txn_process(op, data, txn_dispatch_rw);
 }
 
 /** }}} */

@@ -43,6 +43,9 @@ ENUM0(txn_state, TXN_STATES);
 
 struct box_txn {
 
+	/* transaction LSN */
+	u64 lsn;
+
 	/* transaction state */
 	enum txn_state state;
 	bool aborted;
@@ -78,9 +81,6 @@ struct box_txn {
 	/* inserted and removed tuples */
 	struct box_tuple *new_tuple;
 	struct box_tuple *old_tuple;
-
-	/* transaction LSN */
-	u64 lsn;
 };
 
 static inline struct box_txn *in_txn(void) { return fiber->mod_data.txn; }
@@ -93,8 +93,6 @@ void txn_info(struct tbuf *out);
 struct box_txn *txn_begin(int flags, TxnPort *port);
 void txn_process_ro(u32 op, struct tbuf *data);
 void txn_process_rw(u32 op, struct tbuf *data);
-void txn_commit(struct box_txn *txn);
-void txn_rollback(struct box_txn *txn);
 void txn_drop(struct box_txn *txn);
 
 #endif /* TARANTOOL_TXN_H_INCLUDED */

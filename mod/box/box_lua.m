@@ -177,7 +177,7 @@ lbox_tuple_tostring(struct lua_State *L)
 	return 1;
 }
 
-static void
+void
 lbox_pushtuple(struct lua_State *L, struct box_tuple *tuple)
 {
 	if (tuple) {
@@ -589,48 +589,6 @@ iov_add_multret(struct lua_State *L)
 	for (int i = 1; i <= nargs; ++i)
 		iov_add_ret(L, i);
 }
-
-@interface TxnLuaPort: TxnOutPort {
-@public
-	struct lua_State *L;
-}
-
-- (id) init: (struct lua_State *) l;
-
-@end
-
-@implementation TxnLuaPort
-
-- (id) init: (struct lua_State *) l
-{
-	self = [super init];
-	self->L = l;
-	return self;
-}
-
-- (void) dup_u32: (u32) u32
-{
-	/*
-	 * Do nothing -- the only u32 Box can give us is
-	 * tuple count, and we don't need it, since we intercept
-	 * everything into Lua stack first.
-	 * @sa iov_add_multret
-	 */
-	(void) u32;
-}
-
-- (void) add_u32: (u32 *) pu32
-{
-	/* See the comment in dup_u32. */
-	(void) pu32;
-}
-
-- (void) add_tuple: (struct box_tuple *) tuple
-{
-	lbox_pushtuple(L, tuple);
-}
-
-@end
 
 /* }}} */
 

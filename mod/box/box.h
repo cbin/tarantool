@@ -197,11 +197,6 @@ index_count(struct space *sp)
 	}
 }
 
-/* These are used to implement memcached 'GET' */
-void box_process_ro(u32 op, struct tbuf *data);
-void box_process_rw(u32 op, struct tbuf *data);
-void box_process_lro(u32 op, struct tbuf *data);
-void box_process_lrw(u32 op, struct tbuf *data);
 void box_check_request_time(u32 op, ev_tstamp start, ev_tstamp stop);
 
 #endif /* TARANTOOL_BOX_H_INCLUDED */

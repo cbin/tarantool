@@ -25,6 +25,8 @@
  * SUCH DAMAGE.
  */
 
+#include <stdbool.h>
+
 struct box_txn;
 struct box_tuple;
 
@@ -32,8 +34,7 @@ void txn_execute_select(struct box_txn *txn);
 void txn_execute_delete(struct box_txn *txn);
 void txn_execute_update(struct box_txn *txn);
 void txn_execute_replace(struct box_txn *txn);
-void txn_rollback_indexes(struct box_txn *txn,
-			  struct box_tuple *failed_tuple,
-			  struct box_tuple *backup_tuple);
+void txn_restore_indexes(struct box_txn *txn);
+void txn_release_disused(struct box_txn *txn, bool rollback);
 
 #endif /* TARANTOOL_TXNEXEC_H_INCLUDED */

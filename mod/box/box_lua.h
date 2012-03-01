@@ -30,16 +30,25 @@
  * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+
 struct tbuf;
-struct box_txn;
+struct box_tuple;
+struct lua_State;
 
 /**
  * Invoke a Lua stored procedure from the binary protocol
  * (implementation of 'CALL' command code).
  */
 void box_lua_call(struct tbuf *req);
+
+/**
+ * Push tuple to Lua stack.
+ */
+void lbox_pushtuple(struct lua_State *L, struct box_tuple *tuple);
+
 /**
  * Create an instance of Lua interpreter in box.
  */
 void box_lua_init();
+
 #endif /* INCLUDES_TARANTOOL_MOD_BOX_LUA_H */

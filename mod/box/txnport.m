@@ -23,8 +23,7 @@
  * SUCH DAMAGE.
  */
 
-#include "box.h"
-#include "txn.h"
+#include "txnport.h"
 #include "tuple.h"
 #include "box_lua.h"
 #include <fiber.h>
@@ -82,9 +81,15 @@ const int BOX_REF_THRESHOLD = 8196;
 
 + (id) alloc
 {
-	size_t size = class_getInstanceSize(self);
-	Object *result = p0alloc(fiber->gc_pool, size);
-	result->isa = self;
+	static TxnOutPort *result = nil;
+	if (result == nil) {
+		size_t size = class_getInstanceSize(self);
+		result = malloc(size);
+		if (result == NULL)
+			panic("can't allocate TxnOutPort");
+		memset(result, 0, size);
+		result->isa = self;
+	}
 	return result;
 }
 
@@ -101,12 +106,52 @@ const int BOX_REF_THRESHOLD = 8196;
 - (void) add_tuple: (struct box_tuple *) tuple
 {
 	size_t len = tuple_len(tuple);
-
 	if (len > BOX_REF_THRESHOLD) {
 		iov_add(&tuple->bsize, len);
 	} else {
 		iov_dup(&tuple->bsize, len);
 	}
+}
+
+@end
+
+@implementation TxnLuaPort
+
+- (id) init: (struct lua_State *) l
+{
+	self = [super init];
+	self->L = l;
+	return self;
+}
+
++ (id) alloc
+{
+	size_t size = class_getInstanceSize(self);
+	TxnLuaPort *result = p0alloc(fiber->gc_pool, size);
+	result->isa = self;
+	return result;
+}
+
+- (void) dup_u32: (u32) u32
+{
+	/*
+	 * Do nothing -- the only u32 Box can give us is
+	 * tuple count, and we don't need it, since we intercept
+	 * everything into Lua stack first.
+	 * @sa iov_add_multret
+	 */
+	(void) u32;
+}
+
+- (void) add_u32: (u32 *) pu32
+{
+	/* See the comment in dup_u32. */
+	(void) pu32;
+}
+
+- (void) add_tuple: (struct box_tuple *) tuple
+{
+	lbox_pushtuple(L, tuple);
 }
 
 @end

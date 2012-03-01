@@ -43,6 +43,9 @@
 
 #include <arpa/inet.h>
 
+static void box_process_ro(u32 op, struct tbuf *data);
+static void box_process_lro(u32 op, struct tbuf *data);
+
 const char *mod_name = "Box";
 
 iproto_callback rw_callback = box_process_ro;
@@ -81,28 +84,28 @@ box_check_request_time(u32 op, ev_tstamp start, ev_tstamp stop)
 		say_warn("too long %s: %.3f sec", messages_strs[op], stop - start);
 }
 
-void
+static void
 box_process_ro(u32 op, struct tbuf *data)
 {
 	stat_collect(stat_base, op, 1);
 	txn_process_ro(op, data);
 }
 
-void
+static void
 box_process_rw(u32 op, struct tbuf *data)
 {
 	stat_collect(stat_base, op, 1);
 	txn_process_rw(op, data);
 }
 
-void
+static void
 box_process_call(struct tbuf *data)
 {
 	stat_collect(stat_base, CALL, 1);
 	box_lua_call(data);
 }
 
-void
+static void
 box_process_lro(u32 op, struct tbuf *data)
 {
 	if (op == CALL) {
@@ -112,7 +115,7 @@ box_process_lro(u32 op, struct tbuf *data)
 	}
 }
 
-void
+static void
 box_process_lrw(u32 op, struct tbuf *data)
 {
 	if (op == CALL) {

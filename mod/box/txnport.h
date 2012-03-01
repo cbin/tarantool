@@ -25,8 +25,12 @@
  * SUCH DAMAGE.
  */
 
+#import <objc/Object.h>
 #include <util.h>
-#include <objc/Object.h>
+
+struct fiber;
+struct box_tuple;
+struct lua_State;
 
 @interface TxnPort : Object
 
@@ -41,6 +45,16 @@
 @interface TxnOutPort: TxnPort
 
 + (id) alloc;
+
+@end
+
+@interface TxnLuaPort: TxnPort {
+@public
+	struct lua_State *L;
+}
+
++ (id) alloc;
+- (id) init: (struct lua_State *) l;
 
 @end
 

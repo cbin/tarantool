@@ -122,8 +122,8 @@ txn_validate_indexes(struct box_txn *txn, struct box_tuple *tuple)
 	for (int i = 1; i < n; ++i) {
 		Index *index = txn->space->index[i];
 		if (index->key_def->is_unique) {
-			struct box_tuple *tuple = [index findByTuple: tuple];
-			if (tuple != NULL && tuple != txn->old_tuple)
+			struct box_tuple *found = [index findByTuple: tuple];
+			if (found != NULL && found != txn->old_tuple)
 				tnt_raise(ClientError, :ER_INDEX_VIOLATION);
 		}
 	}
@@ -289,7 +289,8 @@ txn_execute_replace(struct box_txn *txn)
 	txn->flags &= BOX_ALLOWED_REQUEST_FLAGS;
 
 	u32 cardinality = read_u32(txn->data);
-	if (txn->space->cardinality != cardinality)
+	if (txn->space->cardinality > 0
+	    && txn->space->cardinality != cardinality)
 		tnt_raise(IllegalParams, :"tuple cardinality must match space cardinality");
 	if (cardinality == 0)
 		tnt_raise(IllegalParams, :"tuple cardinality is 0");
@@ -388,16 +389,25 @@ txn_execute_select(struct box_txn *txn)
 }
 
 /**
- * Recover after failure of complete tuple update.
+ * Restore indexes on transaction rollback.
  */
 void
-txn_rollback_indexes(struct box_txn *txn,
-		     struct box_tuple *failed_tuple,
-		     struct box_tuple *backup_tuple)
+txn_restore_indexes(struct box_txn *txn)
 {
-	txn_recover_indexes(txn,
-			    index_count(txn->space),
-			    failed_tuple, backup_tuple);
+	txn_recover_indexes(txn, index_count(txn->space),
+			    txn->new_tuple, txn->old_tuple);
+}
+
+/**
+ * Release the tuple that becomes unused on the transaction commit or rollback.
+ */
+void
+txn_release_disused(struct box_txn *txn, bool rollback)
+{
+	struct box_tuple *tuple = (rollback ? txn->new_tuple : txn->old_tuple);
+	if (tuple != NULL) {
+		tuple_ref(tuple, -1);
+	}
 }
 
 /** }}} */
