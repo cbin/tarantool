@@ -715,9 +715,7 @@ alloc_ctx(void)
 static void
 enter_ctx(struct box_lua_ctx *ctx, struct tbuf *data)
 {
-	ctx->flags |= read_u32(data);
-	ctx->flags &= BOX_ALLOWED_REQUEST_FLAGS;
-
+	ctx->flags |= read_u32(data) & BOX_ALLOWED_REQUEST_FLAGS;
 	ctx->L = lua_newthread(root_L);
 	ctx->coro_ref = luaL_ref(root_L, LUA_REGISTRYINDEX);
 }

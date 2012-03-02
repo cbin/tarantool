@@ -86,6 +86,7 @@ extern struct space *space;
 #define BOX_REPLACE			0x04
 #define BOX_NOT_STORE			0x10
 #define BOX_GC_TXN			0x20
+#define BOX_INDEXES_UPDATED		0x40
 #define BOX_ALLOWED_REQUEST_FLAGS	(BOX_RETURN_TUPLE | \
 					 BOX_ADD | \
 					 BOX_REPLACE | \

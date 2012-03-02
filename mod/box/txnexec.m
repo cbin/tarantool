@@ -133,46 +133,44 @@ txn_validate_indexes(struct box_txn *txn, struct box_tuple *tuple)
  * Delete a tuple from all indexes.
  */
 static void
-txn_delete_tuple(struct box_txn *txn, struct box_tuple *old_tuple)
+txn_delete_tuple(struct box_txn *txn)
 {
 	/* delete a tuple from all indexes */
 	int n = index_count(txn->space);
 	for (int i = 0; i < n; i++) {
 		Index *index = txn->space->index[i];
 		@try {
-			[index remove: old_tuple];
+			[index remove: txn->old_tuple];
 		} @catch (...) {
-			txn_recover_indexes(txn, i, NULL, old_tuple);
+			txn_recover_indexes(txn, i, NULL, txn->old_tuple);
 			@throw;
 		}
 	}
 
 	/* register deleted tuple for rollback */
-	txn->old_tuple = old_tuple;
+	txn->flags |= BOX_INDEXES_UPDATED;
 }
 
 /**
  * Replace a tuple in all indexes.
  */
 static void
-txn_replace_tuple(struct box_txn *txn,
-		  struct box_tuple *old_tuple,
-		  struct box_tuple *new_tuple)
+txn_replace_tuple(struct box_txn *txn)
 {
 	/* replace a tuple in all indexes */
 	int n = index_count(txn->space);
 	for (int i = 0; i < n; i++) {
 		Index *index = txn->space->index[i];
 		@try {
-			[index replace: old_tuple :new_tuple];
+			[index replace: txn->old_tuple :txn->new_tuple];
 		} @catch (...) {
-			txn_recover_indexes(txn, i, new_tuple, old_tuple);
+			txn_recover_indexes(txn, i, txn->new_tuple, txn->old_tuple);
 			@throw;
 		}
 	}
 
 	/* register deleted tuple for rollback */
-	txn->old_tuple = old_tuple;
+	txn->flags |= BOX_INDEXES_UPDATED;
 }
 
 /** }}} */
@@ -230,10 +228,8 @@ txn_execute_delete(struct box_txn *txn)
 {
 	txn_assign_spc(txn);
 
-	if (txn->op == DELETE) {
-		txn->flags |= read_u32(txn->data);
-		txn->flags &= BOX_ALLOWED_REQUEST_FLAGS;
-	}
+	if (txn->op == DELETE)
+		txn->flags |= read_u32(txn->data) & BOX_ALLOWED_REQUEST_FLAGS;
 
 	u32 key_len = read_u32(txn->data);
 	if (key_len != 1)
@@ -242,11 +238,11 @@ txn_execute_delete(struct box_txn *txn)
 	if (txn->data->size != 0)
 		tnt_raise(IllegalParams, :"can't unpack request");
 
-	struct box_tuple *old_tuple = [txn->index find: key];
-	if (old_tuple) {
-		txn_delete_tuple(txn, old_tuple);
+	txn->old_tuple = [txn->index find: key];
+	if (txn->old_tuple) {
+		txn_delete_tuple(txn);
 	}
-	txn_result_tuple(txn, old_tuple);
+	txn_result_tuple(txn, txn->old_tuple);
 }
 
 /**
@@ -257,22 +253,21 @@ txn_execute_update(struct box_txn *txn)
 {
 	txn_assign_spc(txn);
 
-	txn->flags |= read_u32(txn->data);
-	txn->flags &= BOX_ALLOWED_REQUEST_FLAGS;
+	txn->flags |= read_u32(txn->data) & BOX_ALLOWED_REQUEST_FLAGS;
 
 	/* Parse UPDATE request. */
 	struct update_cmd *cmd = parse_update_cmd(txn->data);
 
 	/* Try to find the tuple. */
-	struct box_tuple *old_tuple = [txn->index find: get_update_key(cmd)];
-	if (old_tuple != NULL) {
+	txn->old_tuple = [txn->index find: get_update_key(cmd)];
+	if (txn->old_tuple != NULL) {
 		init_update_operations(txn, cmd);
 
 		txn->new_tuple = txn_alloc_tuple(get_update_tuple_len(cmd));
 		do_update(txn, cmd);
 		txn_validate_indexes(txn, txn->new_tuple);
 
-		txn_replace_tuple(txn, old_tuple, txn->new_tuple);
+		txn_replace_tuple(txn);
 	}
 	txn_result_tuple(txn, txn->new_tuple);
 }
@@ -285,8 +280,7 @@ txn_execute_replace(struct box_txn *txn)
 {
 	txn_assign_spc(txn);
 
-	txn->flags |= read_u32(txn->data);
-	txn->flags &= BOX_ALLOWED_REQUEST_FLAGS;
+	txn->flags |= read_u32(txn->data) & BOX_ALLOWED_REQUEST_FLAGS;
 
 	u32 cardinality = read_u32(txn->data);
 	if (txn->space->cardinality > 0
@@ -303,14 +297,14 @@ txn_execute_replace(struct box_txn *txn)
 	memcpy(txn->new_tuple->data, txn->data->data, txn->data->size);
 	txn_validate_indexes(txn, txn->new_tuple);
 
-	struct box_tuple *old_tuple = [txn->index findByTuple: txn->new_tuple];
-	if ((txn->flags & BOX_ADD) != 0 && old_tuple != NULL)
+	txn->old_tuple = [txn->index findByTuple: txn->new_tuple];
+	if ((txn->flags & BOX_ADD) != 0 && txn->old_tuple != NULL)
 		tnt_raise(ClientError, :ER_TUPLE_FOUND);
-	if ((txn->flags & BOX_REPLACE) != 0 && old_tuple == NULL)
+	if ((txn->flags & BOX_REPLACE) != 0 && txn->old_tuple == NULL)
 		tnt_raise(ClientError, :ER_TUPLE_NOT_FOUND);
 
 #ifndef NDEBUG
-	if (old_tuple != NULL) {
+	if (txn->old_tuple != NULL) {
 		void *ka, *kb;
 		ka = tuple_field(txn->new_tuple, txn->index->key_def->parts[0].fieldno);
 		kb = tuple_field(txn->old_tuple, txn->index->key_def->parts[0].fieldno);
@@ -321,7 +315,7 @@ txn_execute_replace(struct box_txn *txn)
 	}
 #endif
 
-	txn_replace_tuple(txn, old_tuple, txn->new_tuple);
+	txn_replace_tuple(txn);
 	txn_result_tuple(txn, txn->new_tuple);
 }
 
@@ -394,8 +388,10 @@ txn_execute_select(struct box_txn *txn)
 void
 txn_restore_indexes(struct box_txn *txn)
 {
-	txn_recover_indexes(txn, index_count(txn->space),
-			    txn->new_tuple, txn->old_tuple);
+	if ((txn->flags & BOX_INDEXES_UPDATED) != 0) {
+		txn_recover_indexes(txn, index_count(txn->space),
+				    txn->new_tuple, txn->old_tuple);
+	}
 }
 
 /**

@@ -417,15 +417,18 @@ txn_wait_commit(struct box_txn *txn)
 
 	txn->state = TXN_PENDING;
 	for (;;) {
+		fiber_yield();
+		fiber_testcancel();
+
+		if (txn != in_txn()) {
+			break;
+		}
 		if (txn->state == TXN_FINISHED)
 			break;
 #if !TXN_DELIVERY_LIST
 		if (txn->state == TXN_DELIVERING_RESULT)
 			break;
 #endif
-
-		fiber_yield();
-		fiber_testcancel();
 	}
 }
 
