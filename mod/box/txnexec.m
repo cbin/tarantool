@@ -84,9 +84,15 @@ txn_recover_indexes(struct box_txn *txn, int n,
 
 /**
  * Validate a tuple against index constraints.
+ *
+ * This function should be called after both txn->new_tuple and txn->old_tuple
+ * are available. Make this explicit by passing them as arguments to avoid any
+ * cahnce for mistake.
  */
 static void
-txn_validate_indexes(struct box_txn *txn, struct box_tuple *tuple)
+txn_validate_indexes(struct box_txn *txn,
+		     struct box_tuple *old_tuple,
+		     struct box_tuple *new_tuple)
 {
 	int n = index_count(txn->space);
 
@@ -97,11 +103,11 @@ txn_validate_indexes(struct box_txn *txn, struct box_tuple *tuple)
 	}
 
 	/* Check to see if the tuple has a sufficient number of fields. */
-	if (tuple->cardinality < txn->space->field_count)
+	if (new_tuple->cardinality < txn->space->field_count)
 		tnt_raise(IllegalParams, :"tuple must have all indexed fields");
 
 	/* Sweep through the tuple and check the field sizes. */
-	u8 *data = tuple->data;
+	u8 *data = new_tuple->data;
 	for (int f = 0; f < txn->space->field_count; ++f) {
 		/* Get the size of the current field and advance. */
 		u32 len = load_varint32((void **) &data);
@@ -122,8 +128,8 @@ txn_validate_indexes(struct box_txn *txn, struct box_tuple *tuple)
 	for (int i = 1; i < n; ++i) {
 		Index *index = txn->space->index[i];
 		if (index->key_def->is_unique) {
-			struct box_tuple *found = [index findByTuple: tuple];
-			if (found != NULL && found != txn->old_tuple)
+			struct box_tuple *tuple = [index findByTuple: new_tuple];
+			if (tuple != NULL && tuple != old_tuple)
 				tnt_raise(ClientError, :ER_INDEX_VIOLATION);
 		}
 	}
@@ -265,7 +271,7 @@ txn_execute_update(struct box_txn *txn)
 
 		txn->new_tuple = txn_alloc_tuple(get_update_tuple_len(cmd));
 		do_update(txn, cmd);
-		txn_validate_indexes(txn, txn->new_tuple);
+		txn_validate_indexes(txn, txn->old_tuple, txn->new_tuple);
 
 		txn_replace_tuple(txn);
 	}
@@ -282,6 +288,7 @@ txn_execute_replace(struct box_txn *txn)
 
 	txn->flags |= read_u32(txn->data) & BOX_ALLOWED_REQUEST_FLAGS;
 
+	/* Validate request data */
 	u32 cardinality = read_u32(txn->data);
 	if (txn->space->cardinality > 0
 	    && txn->space->cardinality != cardinality)
@@ -292,16 +299,20 @@ txn_execute_replace(struct box_txn *txn)
 	    || txn->data->size != valid_tuple(txn->data, cardinality))
 		tnt_raise(IllegalParams, :"incorrect tuple length");
 
+	/* Create a tuple to be inserted */
 	txn->new_tuple = txn_alloc_tuple(txn->data->size);
 	txn->new_tuple->cardinality = cardinality;
 	memcpy(txn->new_tuple->data, txn->data->data, txn->data->size);
-	txn_validate_indexes(txn, txn->new_tuple);
 
+	/* Find if the new tuple replaces some old tuple */
 	txn->old_tuple = [txn->index findByTuple: txn->new_tuple];
 	if ((txn->flags & BOX_ADD) != 0 && txn->old_tuple != NULL)
 		tnt_raise(ClientError, :ER_TUPLE_FOUND);
 	if ((txn->flags & BOX_REPLACE) != 0 && txn->old_tuple == NULL)
 		tnt_raise(ClientError, :ER_TUPLE_NOT_FOUND);
+
+	/* Validate tuple fields against indexes */
+	txn_validate_indexes(txn, txn->old_tuple, txn->new_tuple);
 
 #ifndef NDEBUG
 	if (txn->old_tuple != NULL) {

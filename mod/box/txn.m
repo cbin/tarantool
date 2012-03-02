@@ -195,14 +195,16 @@ txn_deliver(struct box_txn *txn)
 	assert(txn->state == TXN_RESULT_READY);
 
 	txn->state = TXN_DELIVERING_RESULT;
-
 	if (txn->flags & BOX_GC_TXN) {
 		fiber_register_cleanup(txn->client,
 				       (fiber_cleanup_handler) txn_finish,
 				       txn);
-		fiber_wakeup(txn->client);
 	} else {
 		txn_finish(txn);
+	}
+
+	if ((txn->flags & BOX_DELIVER_ASYNC) != 0) {
+		fiber_wakeup(txn->client);
 	}
 }
 
@@ -417,12 +419,13 @@ txn_wait_commit(struct box_txn *txn)
 
 	txn->state = TXN_PENDING;
 	for (;;) {
+		txn->flags |= BOX_DELIVER_ASYNC;
 		fiber_yield();
+		txn->flags &= ~BOX_DELIVER_ASYNC;
 		fiber_testcancel();
 
-		if (txn != in_txn()) {
+		if (txn != in_txn())
 			break;
-		}
 		if (txn->state == TXN_FINISHED)
 			break;
 #if !TXN_DELIVERY_LIST

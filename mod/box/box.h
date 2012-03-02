@@ -81,16 +81,19 @@ struct space {
 
 extern struct space *space;
 
+/* Client-supplied flags */
 #define BOX_RETURN_TUPLE		0x01
 #define BOX_ADD				0x02
 #define BOX_REPLACE			0x04
 #define BOX_NOT_STORE			0x10
-#define BOX_GC_TXN			0x20
-#define BOX_INDEXES_UPDATED		0x40
-#define BOX_ALLOWED_REQUEST_FLAGS	(BOX_RETURN_TUPLE | \
-					 BOX_ADD | \
-					 BOX_REPLACE | \
-					 BOX_NOT_STORE)
+
+/* Client-supplied flags mask */
+#define BOX_ALLOWED_REQUEST_FLAGS	0x0fffffff
+
+/* Internal-only flags */
+#define BOX_GC_TXN			0x20000000
+#define BOX_DELIVER_ASYNC		0x40000000
+#define BOX_INDEXES_UPDATED		0x80000000
 
 /*
     deprecated commands:
