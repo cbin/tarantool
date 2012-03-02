@@ -102,5 +102,7 @@ info:
   recovery_lag: 0.000
   recovery_last_update: 0.000
   status: primary
+  txn_commit_cycles: <cycles>
+  txn_cleanup_cycles: <cycles>
   config: "tarantool.cfg"
 ...
