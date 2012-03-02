@@ -398,7 +398,7 @@ tr58:
 
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
-			if (tuple == NULL || tuple->flags & GHOST) {
+			if (tuple == NULL) {
 				iov_add("NOT_STORED\r\n", 12);
 			} else {
 				value = tuple_field(tuple, 3);
@@ -456,7 +456,7 @@ tr62:
 
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
-			if (tuple == NULL || tuple->flags & GHOST) {
+			if (tuple == NULL) {
 				iov_add("NOT_STORED\r\n", 12);
 			} else {
 				value = tuple_field(tuple, 3);
@@ -516,7 +516,7 @@ tr71:
 
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
-			if (tuple == NULL || tuple->flags & GHOST) {
+			if (tuple == NULL) {
 				iov_add("NOT_STORED\r\n", 12);
 			} else {
 				value = tuple_field(tuple, 3);
@@ -687,7 +687,7 @@ tr118:
 
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
-			if (tuple == NULL || tuple->flags & GHOST || expired(tuple)) {
+			if (tuple == NULL || expired(tuple)) {
 				iov_add("NOT_FOUND\r\n", 11);
 			} else {
 				m = meta(tuple);
@@ -752,7 +752,7 @@ tr122:
 
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
-			if (tuple == NULL || tuple->flags & GHOST || expired(tuple)) {
+			if (tuple == NULL || expired(tuple)) {
 				iov_add("NOT_FOUND\r\n", 11);
 			} else {
 				m = meta(tuple);
@@ -819,7 +819,7 @@ tr132:
 
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
-			if (tuple == NULL || tuple->flags & GHOST || expired(tuple)) {
+			if (tuple == NULL || expired(tuple)) {
 				iov_add("NOT_FOUND\r\n", 11);
 			} else {
 				m = meta(tuple);
@@ -878,7 +878,7 @@ tr141:
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
-			if (tuple == NULL || tuple->flags & GHOST || expired(tuple)) {
+			if (tuple == NULL || expired(tuple)) {
 				iov_add("NOT_FOUND\r\n", 11);
 			} else {
 				@try {
@@ -912,7 +912,7 @@ tr146:
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
-			if (tuple == NULL || tuple->flags & GHOST || expired(tuple)) {
+			if (tuple == NULL || expired(tuple)) {
 				iov_add("NOT_FOUND\r\n", 11);
 			} else {
 				@try {
@@ -942,7 +942,7 @@ tr157:
 	{
 			key = read_field(keys);
 			struct box_tuple *tuple = find(key);
-			if (tuple == NULL || tuple->flags & GHOST || expired(tuple)) {
+			if (tuple == NULL || expired(tuple)) {
 				iov_add("NOT_FOUND\r\n", 11);
 			} else {
 				@try {

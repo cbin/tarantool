@@ -36,8 +36,6 @@ struct tbuf;
 enum tuple_flags {
 	/** Waiting on WAL write to complete. */
 	WAL_WAIT = 0x1,
-	/** A new primary key is created but not yet written to WAL. */
-	GHOST = 0x2,
 };
 
 /**

@@ -222,7 +222,7 @@ void memcached_get(struct box_txn *txn, size_t keys_count, struct tbuf *keys,
 		tuple = find(key);
 		key_len = load_varint32(&key);
 
-		if (tuple == NULL || tuple->flags & GHOST) {
+		if (tuple == NULL) {
 			stat_collect(stat_base, MEMC_GET_MISS, 1);
 			stats.get_misses++;
 			continue;

@@ -934,9 +934,6 @@ snapshot_write_tuple(struct log_io_iter *i, unsigned n, struct box_tuple *tuple)
 	struct tbuf *row;
 	struct box_snap_row header;
 
-	if (tuple->flags & GHOST)	// do not save fictive rows
-		return;
-
 	header.space = n;
 	header.tuple_size = tuple->cardinality;
 	header.data_size = tuple->bsize;
