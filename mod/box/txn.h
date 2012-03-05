@@ -73,11 +73,6 @@ struct box_txn {
 	struct box_txn *process_next;
 	struct box_txn *process_prev;
 
-#if TXN_DELIVERY_LIST
-	/* transaction result delivery list */
-	struct box_txn *delivery_next;
-#endif
-
 	/* inserted and removed tuples */
 	struct box_tuple *new_tuple;
 	struct box_tuple *old_tuple;

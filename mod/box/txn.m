@@ -72,13 +72,6 @@ static struct box_txn *txn_first;
 static struct box_txn *txn_last;
 static struct box_txn *txn_cptr; /* commit loop front */
 
-#if TXN_DELIVERY_LIST
-/* Transaction result delivery list. */
-static struct box_txn *txn_delivery_first;
-static struct box_txn *txn_delivery_last;
-static struct box_txn *txn_dptr; /* delivery loop front */
-#endif
-
 /**
  * Add transaction to the commit/cleanup queue end.
  */
@@ -124,50 +117,6 @@ txn_queue_remove(struct box_txn *txn)
 	txn->process_next = NULL;
 	txn->process_prev = NULL;
 }
-
-#if TXN_DELIVERY_LIST
-static void
-txn_delivery_append(struct box_txn *txn)
-{
-	txn->delivery_next = NULL;
-	txn->delivery_prev = txn_delivery_last;
-
-	if (txn_delivery_last == NULL) {
-		txn_delivery_first = txn;
-	} else {
-		txn_delivery_last->delivery_next = txn;
-	}
-	txn_delivery_last = txn;
-
-	if (txn_dptr == NULL) {
-		txn_dptr = txn;
-	}
-}
-#endif
-
-#if TXN_DELIVERY_LIST
-static void
-txn_delivery_remove(struct box_txn *txn)
-{
-	if (txn_dptr == txn) {
-		txn_dptr = txn->delivery_next;
-	}
-
-	if (txn_delivery_first == txn) {
-		txn_delivery_first = txn->delivery_next;
-	} else {
-		txn->delivery_prev->delivery_next = txn->delivery_next;
-	}
-	if (txn_delivery_last == txn) {
-		txn_delivery_last = txn->delivery_prev;
-	} else {
-		txn->delivery_next->delivery_prev = txn->delivery_prev;
-	}
-
-	txn->delivery_next = NULL;
-	txn->delivery_prev = NULL;
-}
-#endif
 
 /** }}} */
 
@@ -216,11 +165,7 @@ txn_make_result_ready(struct box_txn *txn)
 	assert(txn->state != TXN_FINISHED);
 
 	txn->state = TXN_RESULT_READY;
-#if TXN_DELIVERY_LIST
-	txn_delivery_append(txn);
-#else
 	txn_deliver(txn);
-#endif
 }
 
 void
@@ -428,10 +373,8 @@ txn_wait_commit(struct box_txn *txn)
 			break;
 		if (txn->state == TXN_FINISHED)
 			break;
-#if !TXN_DELIVERY_LIST
 		if (txn->state == TXN_DELIVERING_RESULT)
 			break;
-#endif
 	}
 }
 
@@ -484,23 +427,14 @@ txn_process(u32 op, struct tbuf *data, void (*dispatcher)(struct box_txn *txn))
 
 /* Transaction processing fibers. */
 static struct fiber *txn_commit_fiber;
-#if TXN_DELIVERY_LIST
-static struct fiber *txn_delivery_fiber;
-#endif
 static struct fiber *txn_cleanup_fiber;
 
 /* Transaction processing events */
 static struct ev_prepare txn_commit_ev;
-#if TXN_DELIVERY_LIST
-static struct ev_prepare txn_delivery_ev;
-#endif
 static struct ev_prepare txn_cleanup_ev;
 
 /* Transaction processing statistics. */
 static long long unsigned txn_commit_cycles;
-#if TXN_DELIVERY_LIST
-static long long unsigned txn_delivery_cycles;
-#endif
 static long long unsigned txn_cleanup_cycles;
 
 static void
@@ -527,29 +461,6 @@ txn_commit_loop(void *data __attribute__((unused)))
 		fiber_testcancel();
 	}
 }
-
-#if TXN_DELIVERY_LIST
-static void
-txn_delivery_loop(void *data __attribute__((unused)))
-{
-	for (;; txn_delivery_cycles++) {
-
-		if (txn_dptr != NULL) {
-			switch (txn_dptr->state) {
-			case TXN_RESULT_READY:
-				txn_deliver(txn_dptr);
-				txn_dptr = txn_dptr->process_next;
-				continue;
-			default:
-				break;
-			}
-		}
-
-		fiber_yield();
-		fiber_testcancel();
-	}
-}
-#endif
 
 static void
 txn_cleanup_loop(void *data __attribute__((unused)))
@@ -664,9 +575,6 @@ void
 txn_init(void)
 {
 	txn_commit_fiber = txn_create_fiber("TP commit", txn_commit_loop, &txn_commit_ev);
-#if TXN_DELIVERY_LIST
-	txn_delivery_fiber = txn_create_fiber("TP delivery", txn_delivery_loop, &txn_delivery_ev);
-#endif
 	txn_cleanup_fiber = txn_create_fiber("TP cleanup", txn_cleanup_loop, &txn_cleanup_ev);
 }
 
@@ -677,9 +585,6 @@ void
 txn_start(void)
 {
 	ev_prepare_start(&txn_commit_ev);
-#if TXN_DELIVERY_LIST
-	ev_prepare_start(&txn_delivery_ev);
-#endif
 	ev_prepare_start(&txn_cleanup_ev);
 }
 
@@ -690,9 +595,6 @@ void
 txn_stop(void)
 {
 	ev_prepare_stop(&txn_commit_ev);
-#if TXN_DELIVERY_LIST
-	ev_prepare_stop(&txn_delivery_ev);
-#endif
 	ev_prepare_stop(&txn_cleanup_ev);
 	// TODO: complete commits in progress
 }
@@ -704,9 +606,6 @@ void
 txn_info(struct tbuf *out)
 {
 	tbuf_printf(out, "  txn_commit_cycles: %llu" CRLF, txn_commit_cycles);
-#if TXN_DELIVERY_LIST
-	tbuf_printf(out, "  txn_delivery_cycles: %llu" CRLF, txn_delivery_cycles);
-#endif
 	tbuf_printf(out, "  txn_cleanup_cycles: %llu" CRLF, txn_cleanup_cycles);
 }
 
