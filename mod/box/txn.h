@@ -35,7 +35,6 @@ typedef u64 box_tid;
 	_(TXN_INITIAL, "new") \
 	_(TXN_PENDING, "pending log") \
 	_(TXN_LOGGING, "being logged") \
-	_(TXN_RESULT_READY, "waiting the result delivery") \
 	_(TXN_DELIVERING_RESULT, "sending results to client") \
 	_(TXN_FINISHED, "everything complete") \
 
@@ -88,6 +87,7 @@ void txn_info(struct tbuf *out);
 struct box_txn *txn_begin(int flags, TxnPort *port);
 void txn_process_ro(u32 op, struct tbuf *data);
 void txn_process_rw(u32 op, struct tbuf *data);
+void txn_mock(struct box_txn *txn);
 void txn_drop(struct box_txn *txn);
 
 #endif /* TARANTOOL_TXN_H_INCLUDED */

@@ -141,9 +141,9 @@ txn_finish(struct box_txn *txn)
 static void
 txn_deliver(struct box_txn *txn)
 {
-	assert(txn->state == TXN_RESULT_READY);
-
+	assert(txn->state != TXN_FINISHED);
 	txn->state = TXN_DELIVERING_RESULT;
+
 	if (txn->flags & BOX_GC_TXN) {
 		fiber_register_cleanup(txn->client,
 				       (fiber_cleanup_handler) txn_finish,
@@ -157,46 +157,33 @@ txn_deliver(struct box_txn *txn)
 	}
 }
 
-static void
-txn_make_result_ready(struct box_txn *txn)
-{
-	assert(txn->state != TXN_RESULT_READY);
-	assert(txn->state != TXN_DELIVERING_RESULT);
-	assert(txn->state != TXN_FINISHED);
-
-	txn->state = TXN_RESULT_READY;
-	txn_deliver(txn);
-}
-
 void
 txn_commit_completed(struct box_txn *txn)
 {
 	assert(txn->state == TXN_LOGGING);
-	txn_make_result_ready(txn);
+	txn_deliver(txn);
 }
 
 static void
 txn_abort(struct box_txn *txn)
 {
-	assert(txn->state != TXN_RESULT_READY);
-	assert(txn->state != TXN_DELIVERING_RESULT);
 	assert(txn->state != TXN_FINISHED);
+	assert(txn->state != TXN_DELIVERING_RESULT);
 
 	txn->aborted = true;
-	txn_make_result_ready(txn);
+	txn_deliver(txn);
 }
 
 static void
 txn_message_cb(struct fiber *target, u8 *msg, u32 msg_len __attribute__((unused)))
 {
 	target->message_cb = NULL;
-
 	struct box_txn *txn = target->mod_data.txn;
 
 	u32 reply = load_varint32((void **) &msg);
 	say_debug("txn_wal_write reply=%" PRIu32, reply);
 	if (reply == 0) {
-		txn_make_result_ready(txn);
+		txn_deliver(txn);
 	} else {
 		say_warn("wal writer returned error status");
 		// TODO: schedule rollback from another fiber as
@@ -406,7 +393,7 @@ txn_process(u32 op, struct tbuf *data, void (*dispatcher)(struct box_txn *txn))
 		if (txn_requires_commit(txn)) {
 			txn_wait_commit(txn);
 		} else {
-			txn_make_result_ready(txn);
+			txn_deliver(txn);
 		}
 	}
 	@catch (id e) {
@@ -449,7 +436,6 @@ txn_commit_loop(void *data __attribute__((unused)))
 				/* fallthrough */
 			case TXN_FINISHED:
 			case TXN_DELIVERING_RESULT:
-			case TXN_RESULT_READY:
 				txn_cptr = txn_cptr->process_next;
 				continue;
 			default:
@@ -562,6 +548,28 @@ void
 txn_process_rw(u32 op, struct tbuf *data)
 {
 	txn_process(op, data, txn_dispatch_rw);
+}
+
+/**
+ * Pretend that a transaction was executed. This is needed when the required
+ * action is performed outside the transaction module but the action results
+ * still require proper cleanup sequence.
+ */
+void
+txn_mock(struct box_txn *txn)
+{
+	assert(txn->state == TXN_INITIAL);
+	assert(txn->process_next == NULL);
+	assert(txn->process_prev == NULL);
+	assert(txn == fiber->mod_data.txn);
+	assert(txn->client == NULL);
+
+	/* set minimally necessary data */
+	txn->client = fiber;
+	/* register for commit and cleanup */
+	txn_queue_append(txn);
+	/* trigger result delivery */
+	txn_deliver(txn);
 }
 
 /** }}} */

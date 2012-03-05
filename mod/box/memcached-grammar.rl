@@ -193,9 +193,9 @@ memcached_dispatch()
 			struct box_txn *txn = txn_begin(BOX_GC_TXN, [TxnPort new]);
 			@try {
 				memcached_get(txn, keys_count, keys, show_cas);
-				// TODO: was txn_commit(txn);
+				txn_mock(txn);
 			} @catch (ClientError *e) {
-				// TODO: was txn_rollback(txn);
+				txn_drop(txn);
 				iov_reset();
 				iov_add("SERVER_ERROR ", 13);
 				iov_add(e->errmsg, strlen(e->errmsg));
