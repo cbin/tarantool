@@ -32,12 +32,6 @@
 
 struct tbuf;
 
-/** tuple's flags */
-enum tuple_flags {
-	/** Waiting on WAL write to complete. */
-	WAL_WAIT = 0x1,
-};
-
 /**
  * An atom of Tarantool/Box storage. Consists of a list of fields.
  * The first field is always the primary key.
@@ -47,7 +41,7 @@ struct box_tuple
 	/** reference counter */
 	u16 refs;
 	/* see enum tuple_flags */
-	u16 flags;
+	//u16 flags;
 	/** length of the variable part of the tuple */
 	u32 bsize;
 	/** number of fields in the variable part. */
