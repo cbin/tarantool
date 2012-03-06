@@ -181,10 +181,10 @@ txn_abort(struct box_txn *txn)
 }
 
 /**
- * Callback invoked on the completion of transaction log write.
+ * Callback invoked on a log write completion for transactons.
  */
 static void
-txn_message_cb(struct fiber *target, u8 *msg, u32 msg_len __attribute__((unused)))
+txn_wal_cb(struct fiber *target, u8 *msg, u32 msg_len __attribute__((unused)))
 {
 	target->message_cb = NULL;
 	struct box_txn *txn = target->mod_data.txn;
@@ -228,7 +228,7 @@ txn_wal_write(struct box_txn *txn)
 	tbuf_append(m, &txn->op, sizeof(txn->op));
 	tbuf_append(m, txn->orig_data, txn->orig_size);
 
-	txn->client->message_cb = txn_message_cb;
+	txn->client->message_cb = txn_wal_cb;
 	if (!write_inbox_redirected(txn->client,
 				    recovery_state->wal_writer->out, m)) {
 		confirm_lsn(recovery_state, txn->lsn);
