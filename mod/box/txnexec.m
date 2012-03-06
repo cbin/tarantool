@@ -402,6 +402,7 @@ txn_restore_indexes(struct box_txn *txn)
 	if ((txn->flags & BOX_INDEXES_UPDATED) != 0) {
 		txn_recover_indexes(txn, index_count(txn->space),
 				    txn->new_tuple, txn->old_tuple);
+		txn->flags &= ~BOX_INDEXES_UPDATED;
 	}
 }
 
