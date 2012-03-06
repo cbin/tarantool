@@ -34,8 +34,8 @@
 #include <pickle.h>
 
 /* Transaction log */
-//static u64 txn_log_initiated;
-//static u64 txn_log_completed;
+//static u64 txn_initiated_commits;
+//static u64 txn_completed_commits;
 
 /* {{{ Transaction utilities. *************************************/
 
@@ -122,6 +122,9 @@ txn_queue_remove(struct box_txn *txn)
 
 /* {{{ Transaction processing internal routines. ******************/
 
+/**
+ * Cut off the transaction from its parent fiber.
+ */
 static void
 txn_fiber_detach(struct box_txn *txn)
 {
@@ -130,6 +133,10 @@ txn_fiber_detach(struct box_txn *txn)
 	}
 }
 
+/**
+ * Indicate that all the necesaary job for the transaction is completed
+ * and thus make it eligible for cleanup.
+ */
 static void
 txn_finish(struct box_txn *txn)
 {
@@ -138,6 +145,9 @@ txn_finish(struct box_txn *txn)
 	txn_fiber_detach(txn);
 }
 
+/**
+ * Indicate that transaction results are ready for delivery to the client.
+ */
 static void
 txn_deliver(struct box_txn *txn)
 {
@@ -157,13 +167,9 @@ txn_deliver(struct box_txn *txn)
 	}
 }
 
-void
-txn_commit_completed(struct box_txn *txn)
-{
-	assert(txn->state == TXN_LOGGING);
-	txn_deliver(txn);
-}
-
+/**
+ * Indicate that transaction commit has failed.
+ */
 static void
 txn_abort(struct box_txn *txn)
 {
@@ -174,6 +180,9 @@ txn_abort(struct box_txn *txn)
 	txn_deliver(txn);
 }
 
+/**
+ * Callback invoked on the completion of transaction log write.
+ */
 static void
 txn_message_cb(struct fiber *target, u8 *msg, u32 msg_len __attribute__((unused)))
 {
@@ -194,6 +203,9 @@ txn_message_cb(struct fiber *target, u8 *msg, u32 msg_len __attribute__((unused)
 	confirm_lsn(recovery_state, txn->lsn);
 }
 
+/**
+ * Send the request data to the transaction log writer.
+ */
 static void
 txn_wal_write(struct box_txn *txn)
 {
@@ -225,6 +237,9 @@ txn_wal_write(struct box_txn *txn)
 	}
 }
 
+/**
+ * Dispatch a request in the read-only (replication slave) context.
+ */
 static void
 txn_dispatch_ro(struct box_txn *txn)
 {
@@ -247,6 +262,9 @@ txn_dispatch_ro(struct box_txn *txn)
 	}
 }
 
+/**
+ * Dispatch a request in the read-write context.
+ */
 static void
 txn_dispatch_rw(struct box_txn *txn)
 {
@@ -276,6 +294,9 @@ txn_dispatch_rw(struct box_txn *txn)
 	}
 }
 
+/**
+ * Initiate writing to the transaction log.
+ */
 static void
 txn_commit(struct box_txn *txn)
 {
@@ -290,6 +311,9 @@ txn_commit(struct box_txn *txn)
 	}
 }
 
+/**
+ * Cleanup finished transaction.
+ */
 static void
 txn_cleanup(struct box_txn *txn)
 {
@@ -298,6 +322,9 @@ txn_cleanup(struct box_txn *txn)
 	txn_drop(txn);
 }
 
+/**
+ * Rollback just executed transaction.
+ */
 static void
 txn_rollback(struct box_txn *txn)
 {
@@ -424,6 +451,9 @@ static struct ev_prepare txn_cleanup_ev;
 static long long unsigned txn_commit_cycles;
 static long long unsigned txn_cleanup_cycles;
 
+/**
+ * Transaction commit loop. This is the entry point for corresponding fiber.
+ */
 static void
 txn_commit_loop(void *data __attribute__((unused)))
 {
@@ -448,6 +478,9 @@ txn_commit_loop(void *data __attribute__((unused)))
 	}
 }
 
+/**
+ * Transaction cleanup loop. This is the entry point for corresponding fiber.
+ */
 static void
 txn_cleanup_loop(void *data __attribute__((unused)))
 {
@@ -468,22 +501,28 @@ txn_cleanup_loop(void *data __attribute__((unused)))
 	}
 }
 
+/**
+ * Event callback that invokes transaction processing fibers.
+ */
 static void
 txn_ev_cb(ev_watcher *watcher, int event __attribute__((unused)))
 {
 	fiber_call(watcher->data);
 }
 
+/**
+ * Create a transaction processing fiber.
+ */
 static struct fiber *
 txn_create_fiber(const char *name, void (*loop)(void *), ev_prepare *ev)
 {
-	/* create fiber */
+	/* create the fiber */
 	struct fiber *fiber = fiber_create(name, -1, -1, loop, NULL);
 	if (fiber == NULL) {
 		panic("can't create %s fiber", name);
 	}
 
-	/* prepare fiber for running */
+	/* prepare it for running */
 	ev_prepare_init((ev_watcher *) ev, txn_ev_cb);
 	ev->data = fiber;
 
