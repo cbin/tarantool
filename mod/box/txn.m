@@ -34,8 +34,9 @@
 #include <pickle.h>
 
 /* Transaction log */
-//static u64 txn_initiated_commits;
-//static u64 txn_completed_commits;
+static u64 txn_initiated_commits;
+static u64 txn_completed_commits;
+static bool txn_broken_log;
 
 /* {{{ Transaction utilities. *************************************/
 
@@ -173,11 +174,20 @@ txn_deliver(struct box_txn *txn)
 static void
 txn_abort(struct box_txn *txn)
 {
-	assert(txn->state != TXN_FINISHED);
-	assert(txn->state != TXN_DELIVERING_RESULT);
-
+	assert(txn->state == TXN_LOGGING);
+	txn_broken_log = true;
 	txn->aborted = true;
 	txn_deliver(txn);
+}
+
+/**
+ * Rollback all aborted transactions.
+ */
+static void
+txn_rollback_aborted(void)
+{
+	// TODO: really rollback
+	txn_broken_log = false;
 }
 
 /**
@@ -186,8 +196,11 @@ txn_abort(struct box_txn *txn)
 static void
 txn_wal_cb(struct fiber *target, u8 *msg, u32 msg_len __attribute__((unused)))
 {
+	++txn_completed_commits;
 	target->message_cb = NULL;
+
 	struct box_txn *txn = target->mod_data.txn;
+	confirm_lsn(recovery_state, txn->lsn);
 
 	u32 reply = load_varint32((void **) &msg);
 	say_debug("txn_wal_write reply=%" PRIu32, reply);
@@ -195,12 +208,8 @@ txn_wal_cb(struct fiber *target, u8 *msg, u32 msg_len __attribute__((unused)))
 		txn_deliver(txn);
 	} else {
 		say_warn("wal writer returned error status");
-		// TODO: schedule rollback from another fiber as
-		// this cb is called from the wal writer fiber
 		txn_abort(txn);
 	}
-
-	confirm_lsn(recovery_state, txn->lsn);
 }
 
 /**
@@ -235,6 +244,8 @@ txn_wal_write(struct box_txn *txn)
 		say_warn("wal writer inbox is full");
 		tnt_raise(LoggedError, :ER_WAL_IO);
 	}
+
+	++txn_initiated_commits;
 }
 
 /**
@@ -306,7 +317,6 @@ txn_commit(struct box_txn *txn)
 		txn_wal_write(txn);
 	}
 	@catch (id e) {
-		// TODO: rollback
 		txn_abort(txn);
 	}
 }
@@ -320,18 +330,6 @@ txn_cleanup(struct box_txn *txn)
 	assert(txn->state == TXN_FINISHED);
 	txn_release_disused(txn, txn->aborted);
 	txn_drop(txn);
-}
-
-/**
- * Rollback just executed transaction.
- */
-static void
-txn_rollback(struct box_txn *txn)
-{
-	assert(txn->state != TXN_DELIVERING_RESULT);
-	assert(txn->state != TXN_FINISHED);
-	txn_restore_indexes(txn);
-	txn_release_disused(txn, true);
 }
 
 /** }}} */
@@ -393,6 +391,18 @@ txn_wait_commit(struct box_txn *txn)
 }
 
 /**
+ * Rollback just executed transaction.
+ */
+static void
+txn_rollback_single(struct box_txn *txn)
+{
+	assert(txn->state != TXN_DELIVERING_RESULT);
+	assert(txn->state != TXN_FINISHED);
+	txn_restore_indexes(txn);
+	txn_release_disused(txn, true);
+}
+
+/**
  * Process a request.
  */
 static void
@@ -425,7 +435,7 @@ txn_process(u32 op, struct tbuf *data, void (*dispatcher)(struct box_txn *txn))
 	}
 	@catch (id e) {
 		if (txn_requires_rollback(txn)) {
-			txn_rollback(txn);
+			txn_rollback_single(txn);
 		}
 		txn_drop(txn);
 		@throw;
@@ -448,8 +458,8 @@ static struct ev_prepare txn_commit_ev;
 static struct ev_prepare txn_cleanup_ev;
 
 /* Transaction processing statistics. */
-static long long unsigned txn_commit_cycles;
-static long long unsigned txn_cleanup_cycles;
+static u64 txn_commit_cycles;
+static u64 txn_cleanup_cycles;
 
 /**
  * Transaction commit loop. This is the entry point for corresponding fiber.
@@ -459,7 +469,12 @@ txn_commit_loop(void *data __attribute__((unused)))
 {
 	for (;; txn_commit_cycles++) {
 
-		if (txn_cptr != NULL) {
+		if (txn_broken_log) {
+			if (txn_initiated_commits == txn_completed_commits) {
+				txn_rollback_aborted();
+				continue;
+			}
+		} else if (txn_cptr != NULL) {
 			switch(txn_cptr->state) {
 			case TXN_PENDING:
 				txn_commit(txn_cptr);
@@ -652,8 +667,14 @@ txn_stop(void)
 void
 txn_info(struct tbuf *out)
 {
-	tbuf_printf(out, "  txn_commit_cycles: %llu" CRLF, txn_commit_cycles);
-	tbuf_printf(out, "  txn_cleanup_cycles: %llu" CRLF, txn_cleanup_cycles);
+	tbuf_printf(out, "  txn_commit_cycles: %llu" CRLF,
+		    (unsigned long long) txn_commit_cycles);
+	tbuf_printf(out, "  txn_cleanup_cycles: %llu" CRLF,
+		    (unsigned long long) txn_cleanup_cycles);
+	tbuf_printf(out, "  txn_initiated_commits: %llu" CRLF,
+		    (unsigned long long) txn_initiated_commits);
+	tbuf_printf(out, "  txn_completed_commits: %llu" CRLF,
+		    (unsigned long long) txn_completed_commits);
 }
 
 /** }}} */

@@ -104,5 +104,7 @@ info:
   status: primary
   txn_commit_cycles: <cycles>
   txn_cleanup_cycles: <cycles>
+  txn_initiated_commits: 2
+  txn_completed_commits: 2
   config: "tarantool.cfg"
 ...
