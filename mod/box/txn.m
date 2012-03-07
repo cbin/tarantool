@@ -141,6 +141,20 @@ txn_queue_remove(struct box_txn *txn)
 	txn->process_prev = NULL;
 }
 
+static void
+txn_queue_insert_before(struct box_txn *txn, struct box_txn *before)
+{
+	txn->process_next = before;
+	txn->process_prev = before->process_prev;
+
+	if (before == txn_first) {
+		txn_first = txn;
+	} else {
+		before->process_next = txn;
+	}
+	before->process_prev = txn;
+}
+
 /** }}} */
 
 /* {{{ Transaction processing internal routines. ******************/
@@ -188,7 +202,6 @@ txn_abort(struct box_txn *txn)
 	assert(txn->state == TXN_LOGGING);
 	txn_broken_log = true;
 	txn->flags |= BOX_ABORTED_TXN;
-	txn_deliver(txn);
 }
 
 /**
@@ -197,12 +210,60 @@ txn_abort(struct box_txn *txn)
 static void
 txn_rollback_aborted(void)
 {
-	// TODO: really rollback
-	txn_broken_log = false;
+	/* It is assumed that once a log write fails all the following writes
+	   fail too until the log writer "failure condition" is reset. So it
+	   is assumed that at this moment all the transactions successfully
+	   written to the log are alreadyin the FINISHED or DELIVERING_RESULT
+	   state, and the transactions that are still in the LOGGING state are
+	   all aborted. So all LOGGING transaction have to be rolled back.
+	   All PENDING transactions have to be rolled back as well because
+	   they might have used data from aborted transactions. 
+
+	   All rolled back transactions has to be moved to the tail of the
+	   transaction pipeline so that they are cleaned up after any SELECTs
+	   that might have seen newly inserted tuples are finished delivering
+	   their (dirty) results. */
+
+	struct box_txn *aborted = NULL;
+	struct box_txn *txn = txn_last;
+	while (txn != NULL) {
+		struct box_txn *prev = txn->process_prev;
+		switch (txn->state) {
+		case TXN_PENDING:
+			txn->flags |= BOX_ABORTED_TXN;
+			/* fallthrough */
+		case TXN_LOGGING:
+			assert((txn->flags & BOX_ABORTED_TXN) != 0);
+			/* move the transaction to the tail */
+			if (aborted == NULL) {
+				if (txn != txn_last) {
+					txn_queue_remove(txn);
+					txn_queue_append(txn);
+				}
+			} else {
+				if (txn != aborted->process_prev) {
+					txn_queue_remove(txn);
+					txn_queue_insert_before(txn, aborted);
+				}
+			}
+			aborted = txn;
+			/* rollback and deliver the transaction */
+			txn_restore_indexes(txn);
+			txn_deliver(txn);
+			txn = prev;
+			break;
+		default:
+			txn = prev;
+			break;
+		}
+	}
+
+	txn_cptr = NULL;
+	txn_broken_log = false; 
 }
 
 /**
- * Callback invoked on a log write completion for transactons.
+ * Callback invoked on the completion of a transacton log write.
  */
 static void
 txn_wal_cb(struct fiber *target, u8 *msg, u32 msg_len __attribute__((unused)))
@@ -216,6 +277,7 @@ txn_wal_cb(struct fiber *target, u8 *msg, u32 msg_len __attribute__((unused)))
 	u32 reply = load_varint32((void **) &msg);
 	say_debug("txn_wal_write reply=%" PRIu32, reply);
 	if (reply == 0) {
+		assert(!txn_broken_log);
 		txn_deliver(txn);
 	} else {
 		say_warn("wal writer returned error status");
