@@ -47,16 +47,15 @@ struct box_txn {
 
 	/* transaction state */
 	enum txn_state state;
-	bool aborted;
 
 	/* request operation */
 	u16 op;
 	u32 flags;
 
 	/* request data */
-	struct tbuf *data;
-	void *orig_data;
 	u32 orig_size;
+	void *orig_data;
+	struct tbuf *data;
 
 	/* request attributes */
 	struct space *space;

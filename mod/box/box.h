@@ -91,7 +91,8 @@ extern struct space *space;
 #define BOX_ALLOWED_REQUEST_FLAGS	0x0fffffff
 
 /* Internal-only flags */
-#define BOX_GC_TXN			0x20000000
+#define BOX_GC_TXN			0x10000000
+#define BOX_ABORTED_TXN			0x20000000
 #define BOX_DELIVER_ASYNC		0x40000000
 #define BOX_INDEXES_UPDATED		0x80000000
 

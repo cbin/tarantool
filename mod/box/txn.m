@@ -176,7 +176,7 @@ txn_abort(struct box_txn *txn)
 {
 	assert(txn->state == TXN_LOGGING);
 	txn_broken_log = true;
-	txn->aborted = true;
+	txn->flags |= BOX_ABORTED_TXN;
 	txn_deliver(txn);
 }
 
@@ -328,7 +328,7 @@ static void
 txn_cleanup(struct box_txn *txn)
 {
 	assert(txn->state == TXN_FINISHED);
-	txn_release_disused(txn, txn->aborted);
+	txn_release_disused(txn, (txn->flags & BOX_ABORTED_TXN) != 0);
 	txn_drop(txn);
 }
 
