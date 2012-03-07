@@ -64,6 +64,28 @@ txn_requires_commit(struct box_txn *txn)
 	return txn_requires_rollback(txn);
 }
 
+/**
+ * Bind the transaction to the fiber that created it.
+ */
+static void
+txn_fiber_attach(struct box_txn *txn)
+{
+	assert(fiber->mod_data.txn == NULL);
+	fiber->mod_data.txn = txn;
+	txn->client = fiber;
+}
+
+/**
+ * Cut off the transaction from its parent fiber.
+ */
+static void
+txn_fiber_detach(struct box_txn *txn)
+{
+	assert(txn->client->mod_data.txn == txn);
+	txn->client->mod_data.txn = NULL;
+	txn->client = NULL;
+}
+
 /** }}} */
 
 /* {{{ Transaction pipeline. **************************************/
@@ -124,17 +146,6 @@ txn_queue_remove(struct box_txn *txn)
 /* {{{ Transaction processing internal routines. ******************/
 
 /**
- * Cut off the transaction from its parent fiber.
- */
-static void
-txn_fiber_detach(struct box_txn *txn)
-{
-	if (txn->client != NULL && txn->client->mod_data.txn == txn) {
-		txn->client->mod_data.txn = NULL;
-	}
-}
-
-/**
  * Indicate that all the necesaary job for the transaction is completed
  * and thus make it eligible for cleanup.
  */
@@ -143,7 +154,6 @@ txn_finish(struct box_txn *txn)
 {
 	assert(txn->state == TXN_DELIVERING_RESULT);
 	txn->state = TXN_FINISHED;
-	txn_fiber_detach(txn);
 }
 
 /**
@@ -166,6 +176,7 @@ txn_deliver(struct box_txn *txn)
 	if ((txn->flags & BOX_DELIVER_ASYNC) != 0) {
 		fiber_wakeup(txn->client);
 	}
+	txn_fiber_detach(txn);
 }
 
 /**
@@ -562,8 +573,7 @@ txn_begin(int flags, TxnPort *port)
 	txn->flags = flags;
 	txn->out = port;
 
-	assert(fiber->mod_data.txn == NULL);
-	fiber->mod_data.txn = txn;
+	txn_fiber_attach(txn);
 
 	return txn;
 }
@@ -582,7 +592,9 @@ txn_drop(struct box_txn *txn)
 	if (txn->state != TXN_INITIAL) {
 		txn_queue_remove(txn);
 	}
-	txn_fiber_detach(txn);
+	if (txn->client != NULL) {
+		txn_fiber_detach(txn);
+	}
 	free(txn);
 }
 
@@ -616,10 +628,7 @@ txn_mock(struct box_txn *txn)
 	assert(txn->process_next == NULL);
 	assert(txn->process_prev == NULL);
 	assert(txn == fiber->mod_data.txn);
-	assert(txn->client == NULL);
 
-	/* set minimally necessary data */
-	txn->client = fiber;
 	/* register for commit and cleanup */
 	txn_queue_append(txn);
 	/* trigger result delivery */
