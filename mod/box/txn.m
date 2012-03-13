@@ -516,6 +516,9 @@ txn_process(u32 op, struct tbuf *data, void (*dispatcher)(struct box_txn *txn))
 	@finally {
 		box_check_request_time(op, start, ev_now());
 	}
+	if ((txn->flags & BOX_ABORTED_TXN) != 0) {
+		tnt_raise(LoggedError, :ER_WAL_IO);
+	}
 }
 
 /** }}} */
