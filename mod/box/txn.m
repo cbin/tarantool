@@ -447,7 +447,10 @@ txn_wait_commit(struct box_txn *txn)
 {
 	assert(txn->state == TXN_INITIAL);
 
+	/* Hand the transaction to the logger */
 	txn->state = TXN_PENDING;
+
+	/* wait until the logger is done with it */
 	for (;;) {
 		txn->flags |= BOX_DELIVER_ASYNC;
 		fiber_yield();
@@ -460,6 +463,11 @@ txn_wait_commit(struct box_txn *txn)
 			break;
 		if (txn->state == TXN_DELIVERING_RESULT)
 			break;
+	}
+
+	/* check if the transaction was aborted by the logger */
+	if ((txn->flags & BOX_ABORTED_TXN) != 0) {
+		tnt_raise(LoggedError, :ER_WAL_IO);
 	}
 }
 
@@ -507,17 +515,18 @@ txn_process(u32 op, struct tbuf *data, void (*dispatcher)(struct box_txn *txn))
 		}
 	}
 	@catch (id e) {
-		if (txn_requires_rollback(txn)) {
-			txn_rollback_single(txn);
+		/* drop the transaction if it is not queued yet,
+		   otherwise it will be dropped by the cleanup fiber */
+		if (txn->state == TXN_INITIAL) {
+			if (txn_requires_rollback(txn)) {
+				txn_rollback_single(txn);
+			}
+			txn_drop(txn);
 		}
-		txn_drop(txn);
 		@throw;
 	}
 	@finally {
 		box_check_request_time(op, start, ev_now());
-	}
-	if ((txn->flags & BOX_ABORTED_TXN) != 0) {
-		tnt_raise(LoggedError, :ER_WAL_IO);
 	}
 }
 
