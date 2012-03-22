@@ -950,6 +950,9 @@ mod_snapshot(struct log_io_iter *i)
 {
 	struct box_tuple *tuple;
 
+	/* make tuple store consistent with the last commit */
+	txn_prepare_snapshot();
+
 	for (uint32_t n = 0; n < BOX_SPACE_MAX; ++n) {
 		if (!space[n].enabled)
 			continue;

@@ -89,4 +89,6 @@ void txn_process_rw(u32 op, struct tbuf *data);
 void txn_mock(struct box_txn *txn);
 void txn_drop(struct box_txn *txn);
 
+void txn_prepare_snapshot(void);
+
 #endif /* TARANTOOL_TXN_H_INCLUDED */

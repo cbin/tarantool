@@ -745,6 +745,28 @@ txn_stop(void)
 }
 
 /**
+ * Prepare for a snapshot -- bring the tuple store in the
+ * state consistent with the last successful commit.
+ */
+void
+txn_prepare_snapshot(void)
+{
+	struct box_txn *txn = txn_last;
+	while (txn != NULL) {
+		switch (txn->state) {
+		case TXN_PENDING:
+		case TXN_LOGGING:
+			txn_restore_indexes(txn);
+			break;
+		default:
+			break;
+		}
+
+		txn = txn->process_prev;
+	}
+}
+
+/**
  * Get transaction processing statistics.
  */
 void
