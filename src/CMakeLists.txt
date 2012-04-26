@@ -7,6 +7,8 @@ check_c_compiler_flag ("-Wno-unused-result" gcc_has_wno_unused_result)
 check_c_compiler_flag ("-msse4" gcc_has_sse4)
 check_include_file("cpuid.h" gcc_has_cpuid)
 
+check_function_exists(pthread_condattr_setclock HAVE_PTHREAD_CONDATTR_SETCLOCK)
+
 if (NOT gcc_has_sse4)
     message (FATAL_ERROR "GCC must support SSE4 instructions (-msse4).")
 endif()

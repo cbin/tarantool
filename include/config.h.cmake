@@ -43,7 +43,10 @@
  */
 #define MAP_ANONYMOUS MAP_ANON
 #endif
-
+/*
+ * Defined if pthread_condattr_setclock() is available.
+ */
+#cmakedefine HAVE_PTHREAD_CONDATTR_SETCLOCK
 /*
  * Defined if O_DSYNC mode exists for open(2).
  */

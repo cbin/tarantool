@@ -318,9 +318,12 @@ memcached_dispatch()
 			stats.bytes_written += 7;
 			return -1;
 		}
-		char *r;
-		if ((r = memmem(p, pe - p, "\r\n", 2)) != NULL) {
-			tbuf_peek(fiber->rbuf, r + 2 - (char *)fiber->rbuf->data);
+		/* Search a "\r\n" sequence. */
+		u8 *r = memchr(p, '\r', pe - p);
+		while (r != NULL && *(r + 1) != '\n')
+			r = memchr(r + 1, '\r', pe - r - 1);
+		if (r != NULL) {
+			tbuf_peek(fiber->rbuf, r + 2 - (u8*) fiber->rbuf->data);
 			iov_add("CLIENT_ERROR bad command line format\r\n", 38);
 			return 1;
 		}

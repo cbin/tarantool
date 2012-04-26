@@ -259,7 +259,8 @@ read_rows(struct log_io_iter *i)
 		fseeko(l->f, marker_offset + 1, SEEK_SET);
 
 	for (;;) {
-		say_debug("read_rows: loop start offt 0x%08" PRI_XFFT, ftello(l->f));
+		say_debug("read_rows: loop start offt 0x%08llx",
+			  (unsigned long long) ftello(l->f));
 		if (fread(&magic, l->class->marker_size, 1, l->f) != 1)
 			goto eof;
 
@@ -274,9 +275,11 @@ read_rows(struct log_io_iter *i)
 		}
 		marker_offset = ftello(l->f) - l->class->marker_size;
 		if (good_offset != marker_offset)
-			say_warn("skipped %" PRI_OFFT " bytes after 0x%08" PRI_XFFT " offset",
-				 marker_offset - good_offset, good_offset);
-		say_debug("magic found at 0x%08" PRI_XFFT, marker_offset);
+			say_warn("skipped %llu bytes after 0x%08llx offset",
+				 (unsigned long long) (marker_offset - good_offset),
+				 (unsigned long long) good_offset);
+		say_debug("magic found at 0x%08llx",
+			  (unsigned long long) marker_offset);
 
 		row = l->class->reader(l->f, fiber->gc_pool);
 		if (row == ROW_EOF)
@@ -359,45 +362,43 @@ scan_dir(struct log_io_class *class, i64 **ret_lsn)
 	DIR *dh = NULL;
 	struct dirent *dent;
 	i64 *lsn;
-	size_t suffix_len, i = 0, size = 1024;
-	char *parse_suffix;
+	size_t i = 0, size = 1024;
 	ssize_t result = -1;
 
 	dh = opendir(class->dirname);
 	if (dh == NULL)
 		goto out;
 
-	suffix_len = strlen(class->suffix);
-
 	lsn = palloc(fiber->gc_pool, sizeof(i64) * size);
 	if (lsn == NULL)
 		goto out;
 
 	errno = 0;
+	size_t suffix_len = strlen(class->suffix);
+	size_t inprogress_len = strlen(inprogress_suffix);
 	while ((dent = readdir(dh)) != NULL) {
-		char *suffix = strrchr(dent->d_name, '.');
-
-		if (suffix == NULL)
+		size_t name_len = strlen(dent->d_name);
+		if (name_len < suffix_len)
 			continue;
-
-		char *sub_suffix = memrchr(dent->d_name, '.', suffix - dent->d_name);
 
 		/*
 		 * A valid suffix is either .xlog or
 		 * .xlog.inprogress, given class->suffix ==
-		 * 'xlog'.
+		 * '.xlog'.
 		 */
-		bool valid_suffix;
-		valid_suffix = (strcmp(suffix, class->suffix) == 0 ||
-				(sub_suffix != NULL &&
-				 strcmp(suffix, inprogress_suffix) == 0 &&
-				 strncmp(sub_suffix, class->suffix, suffix_len) == 0));
+		char *suffix = dent->d_name + name_len - suffix_len;
+		if (memcmp(suffix, class->suffix, suffix_len) != 0) {
+			suffix -= inprogress_len;
+			if (memcmp(suffix, class->suffix, suffix_len) != 0 ||
+			    memcmp(suffix + suffix_len, inprogress_suffix,
+				   inprogress_len) != 0) {
+				continue;
+			}
+		}
 
-		if (!valid_suffix)
-			continue;
-
+		char *parse_suffix;
 		lsn[i] = strtoll(dent->d_name, &parse_suffix, 10);
-		if (strncmp(parse_suffix, class->suffix, suffix_len) != 0) {
+		if (parse_suffix != suffix) {
 			/* d_name doesn't parse entirely, ignore it */
 			say_warn("can't parse `%s', skipping", dent->d_name);
 			continue;
@@ -1282,6 +1283,7 @@ wal_writer_init(struct wal_writer *writer)
 	tt_pthread_mutex_init(&writer->mutex, &errorcheck);
 	tt_pthread_mutexattr_destroy(&errorcheck);
 
+#if HAVE_PTHREAD_CONDATTR_SETCLOCK 
 	pthread_condattr_t clock_monotonic;
 	tt_pthread_condattr_init(&clock_monotonic);
 
@@ -1292,6 +1294,9 @@ wal_writer_init(struct wal_writer *writer)
 
 	tt_pthread_cond_init(&writer->cond, &clock_monotonic);
 	tt_pthread_condattr_destroy(&clock_monotonic);
+#else
+	tt_pthread_cond_init(&writer->cond, NULL);
+#endif
 
 	STAILQ_INIT(&writer->input);
 	STAILQ_INIT(&writer->output);
