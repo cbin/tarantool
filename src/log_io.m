@@ -1283,7 +1283,7 @@ wal_writer_init(struct wal_writer *writer)
 	tt_pthread_mutex_init(&writer->mutex, &errorcheck);
 	tt_pthread_mutexattr_destroy(&errorcheck);
 
-#if HAVE_PTHREAD_CONDATTR_SETCLOCK 
+#ifdef HAVE_PTHREAD_CONDATTR_SETCLOCK
 	pthread_condattr_t clock_monotonic;
 	tt_pthread_condattr_init(&clock_monotonic);
 
