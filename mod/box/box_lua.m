@@ -46,7 +46,12 @@
 #include "salloc.h"
 
 /* contents of box.lua */
+#if TARGET_OS_DARWIN
+# include <mach-o/getsect.h>
+#else
+/* contents of box.lua */
 extern const char _binary_box_lua_start;
+#endif
 
 /**
  * All box connections share the same Lua state. We use
@@ -824,8 +829,17 @@ mod_lua_init(struct lua_State *L)
 	lua_pop(L, 1);
 	tarantool_lua_register_type(L, iteratorlib_name, lbox_iterator_meta);
 	/* Load box.lua */
+#if TARGET_OS_DARWIN
+	unsigned long sectsize;
+	char *sectdata = getsectdata("__DATA", "__box_lua", &sectsize);
+	if (sectdata == NULL)
+		panic("Error finding box.lua section");
+	if (luaL_dostring(L, sectdata))
+		panic("Error loading box.lua: %s", lua_tostring(L, -1));
+#else
 	if (luaL_dostring(L, &_binary_box_lua_start))
 		panic("Error loading box.lua: %s", lua_tostring(L, -1));
+#endif
 	assert(lua_gettop(L) == 0);
 	return L;
 }

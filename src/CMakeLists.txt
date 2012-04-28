@@ -8,6 +8,9 @@ check_c_compiler_flag ("-msse4" gcc_has_sse4)
 check_include_file("cpuid.h" gcc_has_cpuid)
 
 check_library_exists(pthread pthread_condattr_setclock "" HAVE_PTHREAD_CONDATTR_SETCLOCK)
+if (HAVE_PTHREAD_CONDATTR_SETCLOCK)
+  set(RT rt)
+endif()
 
 if (NOT gcc_has_sse4)
     message (FATAL_ERROR "GCC must support SSE4 instructions (-msse4).")
@@ -34,7 +37,7 @@ endif()
 #
 # libev uses ceil and floor from the standard math library
 #
-target_link_libraries(ev m rt)
+target_link_libraries(ev m ${RT})
 
 #
 # Build admin.m from admin.rl, but only if admin.rl was changed.
@@ -87,7 +90,7 @@ add_library(core STATIC ${common_sources})
 add_dependencies(core generate_headers luajit)
 set_target_properties(core PROPERTIES COMPILE_FLAGS "${core_cflags}")
 
-set (common_libraries cfg core ev coro gopt misc objc rt)
+set (common_libraries cfg core ev coro gopt misc objc ${RT})
 
 set (THREAD_LIB pthread)
 if (ENABLE_STATIC)
