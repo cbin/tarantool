@@ -156,6 +156,10 @@ core_reload_config(const struct tarantool_cfg *old_conf,
 
 	recovery_update_mode(new_conf->wal_mode, new_delay);
 
+	recovery_update_io_rate_limit(new_conf->snap_io_rate_limit);
+
+	ev_set_io_collect_interval(new_conf->io_collect_interval);
+
 	return 0;
 }
 
@@ -279,6 +283,10 @@ snapshot(void *ev, int events __attribute__((unused)))
 	fiber_set_name(fiber, "dumper");
 	set_proc_title("dumper (%" PRIu32 ")", getppid());
 
+	/*
+	 * Safety: make sure we don't double-write
+	 * parent stdio buffers at exit().
+	 */
 	close_all_xcpt(1, sayfd);
 	snapshot_save(recovery_state, mod_snapshot);
 
@@ -685,6 +693,14 @@ main(int argc, char **argv)
 	tarantool_lua_load_cfg(tarantool_L, &cfg);
 	admin_init();
 	replication_init();
+
+	/*
+	 * Load user init script.
+	 * The script should have access to Tarantool Lua API (box.cfg,
+	 * box.fiber, etc...) that is why script must run only after the server
+	 * was fully initialized.
+	 */
+	tarantool_lua_load_init_script(tarantool_L);
 
 	prelease(fiber->gc_pool);
 	say_crit("log level %i", cfg.log_level);

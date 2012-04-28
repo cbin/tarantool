@@ -43,7 +43,6 @@
 
 #include "pickle.h"
 #include "tuple.h"
-#include "salloc.h"
 
 /* contents of box.lua */
 #if TARGET_OS_DARWIN
