@@ -27,17 +27,10 @@ else()
     set(module_link_flags "box.lua.o")
 
     set_property(DIRECTORY PROPERTY ADDITIONAL_MAKE_CLEAN_FILES box.lua.o)
-
+    set_source_files_properties(box.lua.o PROPERTIES EXTERNAL_OBJECT true)
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/box.lua.o
         COMMAND cd ${CMAKE_SOURCE_DIR}/mod/box && ${LD} -r -b binary box.lua -o ${CMAKE_CURRENT_BINARY_DIR}/box.lua.o
         DEPENDS box.lua)
-
-    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/box.lua.o
-        COMMAND cd ${CMAKE_SOURCE_DIR}/mod/box && ${LD} -r -b binary box.lua -o ${CMAKE_CURRENT_BINARY_DIR}/box.lua.o
-        DEPENDS box.lua)
-
-    set_source_files_properties(box.lua.o
-        PROPERTIES EXTERNAL_OBJECT true)
 endif()
 
 tarantool_module("box" tuple.m index.m tree.m box.m box_lua.m
