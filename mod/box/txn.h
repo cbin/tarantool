@@ -58,7 +58,7 @@ struct box_txn {
 	struct tbuf *data;
 
 	/* request attributes */
-	struct space *space;
+	struct space *sp;
 	Index *index;
 
 	/* result sink */

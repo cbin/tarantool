@@ -40,6 +40,7 @@
 #include "pickle.h"
 #include "tuple.h"
 #include "salloc.h"
+#include <objc/runtime.h>
 
 struct box_lua_ctx
 {
@@ -59,6 +60,47 @@ extern const char _binary_box_lua_start;
  * procedures running at the same time.
  */
 lua_State *root_L;
+
+@implementation TxnLuaPort
+
+- (id) init: (struct lua_State *) l
+{
+	self = [super init];
+	self->L = l;
+	return self;
+}
+
++ (id) alloc
+{
+	size_t size = class_getInstanceSize(self);
+	TxnLuaPort *result = p0alloc(fiber->gc_pool, size);
+	result->isa = self;
+	return result;
+}
+
+- (void) dup_u32: (u32) u32
+{
+	/*
+	 * Do nothing -- the only u32 Box can give us is
+	 * tuple count, and we don't need it, since we intercept
+	 * everything into Lua stack first.
+	 * @sa iov_add_multret
+	 */
+	(void) u32;
+}
+
+- (void) add_u32: (u32 *) pu32
+{
+	/* See the comment in dup_u32. */
+	(void) pu32;
+}
+
+- (void) add_tuple: (struct box_tuple *) tuple
+{
+	lbox_pushtuple(L, tuple);
+}
+
+@end
 
 /*
  * Functions, exported in box_lua.h should have prefix

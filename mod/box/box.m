@@ -50,9 +50,9 @@
 #include "box_lua.h"
 #include "txn.h"
 #include "txnexec.h"
-#include "update.h"
 #include <tarantool.h>
 #include <tarantool_ev.h>
+#include <objc/runtime.h>
 
 static void box_process_ro(u32 op, struct tbuf *request_data);
 static void box_process_lro(u32 op, struct tbuf *request_data);
@@ -63,6 +63,17 @@ iproto_callback rw_callback = box_process_ro;
 iproto_callback lrw_callback = box_process_lro;
 
 static char status[64] = "unknown";
+
+static void txn_assign_spc(struct box_txn *txn);
+static void commit_replace(struct box_txn *txn);
+static void txn_result_tuple(struct box_txn *txn, struct box_tuple *tuple);
+static void txn_assign_spc_idx(struct box_txn *txn);
+static void commit_delete(struct box_txn *txn);
+static void rollback_replace(struct box_txn *txn, int n,
+				struct box_tuple *failed_tuple,
+				struct box_tuple *backup_tuple);
+static void txn_abort(struct box_txn *txn);
+static void txn_wal_write(struct box_txn *txn);
 
 static int stat_base;
 STRS(messages, MESSAGES);
@@ -80,6 +91,7 @@ STRS(messages, MESSAGES);
 */
 
 const int BOX_REF_THRESHOLD = 8196;
+
 struct space *space = NULL;
 
 /* Secondary indexes are built in bulk after all data is
@@ -113,6 +125,12 @@ index_count(struct space *sp)
 	}
 }
 
+static inline struct box_snap_row *
+box_snap_row(const struct tbuf *t)
+{
+	return (struct box_snap_row *)t->data;
+}
+
 /**
  * Allocate and reference a tuple.
  */
@@ -124,45 +142,6 @@ txn_alloc_tuple(size_t size)
 	return tuple;
 }
 
-/**
- * Initialize transaction with given space and index.
- */
-static void
-txn_set_spc_idx(struct box_txn *txn, u32 spc_n, u32 idx_n)
-{
-	if (spc_n >= BOX_SPACE_MAX)
-		tnt_raise(ClientError, :ER_NO_SUCH_SPACE, spc_n);
-	txn->space = &space[spc_n];
-
-	if (!txn->space->enabled)
-		tnt_raise(ClientError, :ER_SPACE_DISABLED, spc_n);
-
-	if (idx_n >= txn->space->key_count)
-		tnt_raise(LoggedError, :ER_NO_SUCH_INDEX, idx_n, spc_n);
-	txn->index = txn->space->index[idx_n];
-}
-
-/**
- * Initialize transaction with requested space and default index.
- */
-static void
-txn_assign_spc(struct box_txn *txn)
-{
-	u32 spc_n = read_u32(txn->data);
-	txn_set_spc_idx(txn, spc_n, 0);
-}
-
-/**
- * Initialize transaction with requested space and requested index.
- */
-static void
-txn_assign_spc_idx(struct box_txn *txn)
-{
-	u32 spc_n = read_u32(txn->data);
-	u32 idx_n = read_u32(txn->data);
-	txn_set_spc_idx(txn, spc_n, idx_n);
-}
-
 
 
 void
@@ -170,62 +149,6 @@ box_check_request_time(u32 op, ev_tstamp start, ev_tstamp stop)
 {
 	if (stop - start > cfg.too_long_threshold)
 		say_warn("too long %s: %.3f sec", messages_strs[op], stop - start);
-}
-
-static inline struct box_snap_row *
-box_snap_row(const struct tbuf *t)
-{
-	return (struct box_snap_row *)t->data;
-}
-
-static void
-box_process_ro(u32 op, struct tbuf *data)
-{
-	stat_collect(stat_base, op, 1);
-	txn_process_ro(op, data);
-}
-
-static void
-box_process_rw(u32 op, struct tbuf *data)
-{
-	stat_collect(stat_base, op, 1);
-	txn_process_rw(op, data);
-}
-
-static void
-box_process_call(struct tbuf *data)
-{
-	stat_collect(stat_base, CALL, 1);
-	box_lua_call(data);
-}
-
-static void
-box_process_lro(u32 op, struct tbuf *data)
-{
-	if (op == CALL) {
-		box_process_call(data);
-	} else {
-		box_process_ro(op, data);
-	}
-}
-
-static void
-box_process_lrw(u32 op, struct tbuf *data)
-{
-	if (op == CALL) {
-		box_process_call(data);
-	} else {
-		box_process_rw(op, data);
-	}
-}
-
-
-/** Free a key definition. */
-static void
-key_free(struct key_def *key_def)
-{
-	free(key_def->parts);
-	free(key_def->cmp_order);
 }
 
 /**
@@ -236,11 +159,10 @@ key_free(struct key_def *key_def)
  * cahnce for mistake.
  */
 static void
-validate_indexes(struct box_txn *txn,
-		 struct box_tuple *old_tuple,
-		 struct box_tuple *tuple)
+validate_indexes(struct box_txn *txn)
 {
-	int n = index_count(txn->space);
+	struct space *sp = txn->sp;
+	int n = index_count(sp);
 
 	/* Only secondary indexes are validated here. So check to see
 	   if there are any.*/
@@ -249,22 +171,22 @@ validate_indexes(struct box_txn *txn,
 	}
 
 	/* Check to see if the tuple has a sufficient number of fields. */
-	if (tuple->cardinality < txn->space->field_count)
+	if (txn->tuple->cardinality < sp->field_count)
 		tnt_raise(IllegalParams, :"tuple must have all indexed fields");
 
 	/* Sweep through the tuple and check the field sizes. */
-	u8 *data = tuple->data;
-	for (int f = 0; f < txn->space->field_count; ++f) {
+	u8 *data = txn->tuple->data;
+	for (int f = 0; f < sp->field_count; ++f) {
 		/* Get the size of the current field and advance. */
 		u32 len = load_varint32((void **) &data);
 		data += len;
 
 		/* Check fixed size fields (NUM and NUM64) and skip undefined
 		   size fields (STRING and UNKNOWN). */
-		if (txn->space->field_types[f] == NUM) {
+		if (sp->field_types[f] == NUM) {
 			if (len != sizeof(u32))
 				tnt_raise(IllegalParams, :"field must be NUM");
-		} else if (txn->space->field_types[f] == NUM64) {
+		} else if (sp->field_types[f] == NUM64) {
 			if (len != sizeof(u64))
 				tnt_raise(IllegalParams, :"field must be NUM64");
 		}
@@ -272,71 +194,11 @@ validate_indexes(struct box_txn *txn,
 
 	/* Check key uniqueness */
 	for (int i = 1; i < n; ++i) {
-		Index *index = txn->space->index[i];
+		Index *index = sp->index[i];
 		if (index->key_def->is_unique) {
-			struct box_tuple *tuple = [index findByTuple: tuple];
-			if (tuple != NULL && tuple != old_tuple)
+			struct box_tuple *tuple = [index findByTuple: txn->tuple];
+			if (tuple != NULL && tuple != txn->old_tuple)
 				tnt_raise(ClientError, :ER_INDEX_VIOLATION);
-		}
-	}
-}
-
-/**
- * Recover after failure in the midst of index update.
- */
-static void
-txn_recover_indexes(struct box_txn *txn, int n,
-		    struct box_tuple *failed_tuple,
-		    struct box_tuple *backup_tuple)
-{
-	assert(n <= index_count(txn->space));
-	assert(failed_tuple != NULL || backup_tuple != NULL);
-
-	for (int i = 0; i < n; i++) {
-		Index *index = txn->space->index[i];
-		if (backup_tuple != NULL) {
-			[index replace: failed_tuple :backup_tuple];
-		} else {
-			[index remove: failed_tuple];
-		}
-	}
-}
-
-
-/**
- * Replace a tuple in all indexes.
- */
-static void
-txn_replace_tuple(struct box_txn *txn)
-{
-	/* replace a tuple in all indexes */
-	int n = index_count(txn->space);
-	for (int i = 0; i < n; i++) {
-		Index *index = txn->space->index[i];
-		@try {
-			[index replace: txn->old_tuple :txn->tuple];
-		} @catch (...) {
-			txn_recover_indexes(txn, i, txn->tuple, txn->old_tuple);
-			@throw;
-		}
-	}
-
-	/* register deleted tuple for rollback */
-	txn->flags |= BOX_INDEXES_UPDATED;
-}
-
-/**
- * Handle single-tuple result.
- */
-static void
-txn_result_tuple(struct box_txn *txn, struct box_tuple *tuple)
-{
-	if (tuple == NULL) {
-		[txn->out dup_u32: 0];
-	} else {
-		[txn->out dup_u32: 1];
-		if ((txn->flags & BOX_RETURN_TUPLE) != 0) {
-			[txn->out add_tuple: tuple];
 		}
 	}
 }
@@ -345,27 +207,27 @@ txn_result_tuple(struct box_txn *txn, struct box_tuple *tuple)
  * Execute REPLACE request.
  */
 void
-txn_execute_replace(struct box_txn *txn)
+prepare_replace(struct box_txn *txn)
 {
 	txn_assign_spc(txn);
+	struct tbuf *data = txn->data;
 
 	txn->flags |= read_u32(txn->data) & BOX_ALLOWED_REQUEST_FLAGS;
 
 	/* Validate request data */
 	u32 cardinality = read_u32(txn->data);
-	if (txn->space->cardinality > 0
-	    && txn->space->cardinality != cardinality)
+	if (txn->sp->cardinality > 0
+	    && txn->sp->cardinality != cardinality)
 		tnt_raise(IllegalParams, :"tuple cardinality must match space cardinality");
 	if (cardinality == 0)
 		tnt_raise(IllegalParams, :"tuple cardinality is 0");
-	if (txn->data->size == 0
-	    || txn->data->size != valid_tuple(txn->data, cardinality))
+	if (data->size == 0 || data->size != valid_tuple(data, cardinality))
 		tnt_raise(IllegalParams, :"incorrect tuple length");
 
 	/* Create a tuple to be inserted */
-	txn->tuple = txn_alloc_tuple(txn->data->size);
+	txn->tuple = txn_alloc_tuple(data->size);
 	txn->tuple->cardinality = cardinality;
-	memcpy(txn->tuple->data, txn->data->data, txn->data->size);
+	memcpy(txn->tuple->data, data->data, data->size);
 
 	/* Find if the new tuple replaces some old tuple */
 	txn->old_tuple = [txn->index findByTuple: txn->tuple];
@@ -375,7 +237,7 @@ txn_execute_replace(struct box_txn *txn)
 		tnt_raise(ClientError, :ER_TUPLE_NOT_FOUND);
 
 	/* Validate tuple fields against indexes */
-	validate_indexes(txn, txn->old_tuple, txn->tuple);
+	validate_indexes(txn);
 
 #ifndef NDEBUG
 	if (txn->old_tuple != NULL) {
@@ -389,80 +251,56 @@ txn_execute_replace(struct box_txn *txn)
 	}
 #endif
 
-	txn_replace_tuple(txn);
+	commit_replace(txn);
 	txn_result_tuple(txn, txn->tuple);
 }
 
+/**
+ * Replace a tuple in all indexes.
+ */
 static void
-space_free(void)
+commit_replace(struct box_txn *txn)
 {
-	int i;
-	for (i = 0 ; i < BOX_SPACE_MAX ; i++) {
-		if (!space[i].enabled)
-			continue;
-
-		int j;
-		for (j = 0 ; j < space[i].key_count; j++) {
-			Index *index = space[i].index[j];
-			[index free];
-			key_free(&space[i].key_defs[j]);
+	/* replace a tuple in all indexes */
+	int n = index_count(txn->sp);
+	for (int i = 0; i < n; i++) {
+		Index *index = txn->sp->index[i];
+		@try {
+			[index replace: txn->old_tuple :txn->tuple];
+		} @catch (...) {
+			rollback_replace(txn, i, txn->tuple, txn->old_tuple);
+			@throw;
 		}
+	}
 
-		free(space[i].key_defs);
-		free(space[i].field_types);
+	/* register deleted tuple for rollback */
+	txn->flags |= BOX_INDEXES_UPDATED;
+}
+
+/**
+ * Recover after failure in the midst of index update.
+ */
+static void
+rollback_replace(struct box_txn *txn,
+		 int n,
+		 struct box_tuple *failed_tuple,
+		 struct box_tuple *backup_tuple)
+{
+	assert(n <= index_count(txn->sp));
+	assert(failed_tuple != NULL || backup_tuple != NULL);
+
+	for (int i = 0; i < n; i++) {
+		Index *index = txn->sp->index[i];
+		if (backup_tuple != NULL) {
+			[index replace: failed_tuple :backup_tuple];
+		} else {
+			[index remove: failed_tuple];
+		}
 	}
 }
 
-static void
-key_init(struct key_def *def, struct tarantool_cfg_space_index *cfg_index)
-{
-	def->max_fieldno = 0;
-	def->part_count = 0;
 
-	/* Calculate key cardinality and maximal field number. */
-	for (int k = 0; cfg_index->key_field[k] != NULL; ++k) {
-		typeof(cfg_index->key_field[k]) cfg_key = cfg_index->key_field[k];
 
-		if (cfg_key->fieldno == -1) {
-			/* last filled key reached */
-			break;
-		}
-
-		def->max_fieldno = MAX(def->max_fieldno, cfg_key->fieldno);
-		def->part_count++;
-	}
-
-	/* init def array */
-	def->parts = malloc(sizeof(struct key_part) * def->part_count);
-	if (def->parts == NULL) {
-		panic("can't allocate def parts array for index");
-	}
-
-	/* init compare order array */
-	def->max_fieldno++;
-	def->cmp_order = malloc(def->max_fieldno * sizeof(u32));
-	if (def->cmp_order == NULL) {
-		panic("can't allocate def cmp_order array for index");
-	}
-	memset(def->cmp_order, -1, def->max_fieldno * sizeof(u32));
-
-	/* fill fields and compare order */
-	for (int k = 0; cfg_index->key_field[k] != NULL; ++k) {
-		typeof(cfg_index->key_field[k]) cfg_key = cfg_index->key_field[k];
-
-		if (cfg_key->fieldno == -1) {
-			/* last filled key reached */
-			break;
-		}
-
-		/* fill keys */
-		def->parts[k].fieldno = cfg_key->fieldno;
-		def->parts[k].type = STR2ENUM(field_data_type, cfg_key->type);
-		/* fill compare order */
-		def->cmp_order[cfg_key->fieldno] = k;
-	}
-	def->is_unique = cfg_index->unique;
-}
 
 /** {{{ UPDATE request implementation.
  * UPDATE request is represented by a sequence of operations,
@@ -774,7 +612,7 @@ static struct update_op_meta update_op_meta[UPDATE_OP_MAX + 1] = {
  * update operations. Do not do too much, since the subject
  * tuple may not exist.
  */
-struct update_cmd *
+static struct update_cmd *
 parse_update_cmd(struct tbuf *data)
 {
 	struct update_cmd *cmd = palloc(fiber->gc_pool,
@@ -864,7 +702,7 @@ update_field_init(struct update_cmd *cmd, struct update_field *field,
  * We found a tuple to do the update on. Prepare and optimize
  * the operations.
  */
-void
+static void
 init_update_operations(struct box_txn *txn, struct update_cmd *cmd)
 {
 	/*
@@ -955,7 +793,7 @@ init_update_operations(struct box_txn *txn, struct update_cmd *cmd)
 	cmd->field_end = field;
 }
 
-void
+static void
 do_update(struct box_txn *txn, struct update_cmd *cmd)
 {
 	void *new_data = txn->tuple->data;
@@ -1016,17 +854,588 @@ do_update(struct box_txn *txn, struct update_cmd *cmd)
 	}
 }
 
-void *
-get_update_key(struct update_cmd *cmd)
+/**
+ * Execute UPDATE request.
+ */
+static void __attribute__((noinline))
+prepare_update(struct box_txn *txn)
 {
-	return cmd->key;
+	txn_assign_spc(txn);
+
+	txn->flags |= read_u32(txn->data) & BOX_ALLOWED_REQUEST_FLAGS;
+
+	/* Parse UPDATE request. */
+	struct update_cmd *cmd = parse_update_cmd(txn->data);
+
+	/* Try to find the tuple. */
+	txn->old_tuple = [txn->index find: cmd->key];
+	if (txn->old_tuple == NULL) {
+		goto out;
+	}
+
+	init_update_operations(txn, cmd);
+	/* allocate new tuple */
+	txn->tuple = txn_alloc_tuple(cmd->new_tuple_len);
+	do_update(txn, cmd);
+	validate_indexes(txn);
+
+	commit_replace(txn);
+out:
+	txn_result_tuple(txn, txn->tuple);
 }
 
-size_t
-get_update_tuple_len(struct update_cmd *cmd)
+/** }}} */
+
+/**
+ * Execute SELECT request.
+ */
+void
+process_select(struct box_txn *txn)
 {
-	return cmd->new_tuple_len;
+	struct tbuf *data = txn->data;
+	ERROR_INJECT(ERRINJ_TESTING);
+
+	txn_assign_spc_idx(txn);
+
+	u32 offset = read_u32(txn->data);
+	u32 limit = read_u32(txn->data);
+	u32 count = read_u32(txn->data);
+	if (count == 0)
+		tnt_raise(IllegalParams, :"tuple count must be positive");
+
+	uint32_t *found = palloc(fiber->gc_pool, sizeof(*found));
+	[txn->out add_u32: found];
+	*found = 0;
+
+	for (u32 i = 0; i < count; i++) {
+
+		Index *index = txn->index;
+		/* End the loop if reached the limit. */
+		if (limit == *found)
+			return;
+
+		u32 key_cardinality = read_u32(data);
+
+		void *key = NULL;
+		if (key_cardinality) {
+			if (key_cardinality > index->key_def->part_count) {
+				tnt_raise(ClientError, :ER_KEY_CARDINALITY,
+					  key_cardinality,
+					  index->key_def->part_count);
+			}
+
+			key = read_field(data);
+
+			/* advance remaining fields of a key */
+			for (int i = 1; i < key_cardinality; i++)
+				read_field(data);
+		}
+
+		struct iterator *it = index->position;
+		[index initIterator: it :key :key_cardinality];
+
+		struct box_tuple *tuple = it->next_equal(it);
+		while (tuple != NULL && offset > 0) {
+			tuple = it->next_equal(it);
+			--offset;
+		}
+		while (tuple != NULL && *found < limit) {
+			[txn->out add_tuple: tuple];
+			tuple = it->next_equal(it);
+			++(*found);
+		}
+	}
+
+	if (data->size != 0) {
+		tnt_raise(IllegalParams, :"can't unpack request");
+	}
 }
+
+static void __attribute__((noinline))
+prepare_delete(struct box_txn *txn)
+{
+	txn_assign_spc(txn);
+
+	if (txn->op == DELETE)
+		txn->flags |= read_u32(txn->data) & BOX_ALLOWED_REQUEST_FLAGS;
+
+	u32 key_len = read_u32(txn->data);
+	if (key_len != 1)
+		tnt_raise(IllegalParams, :"key must be single valued");
+	void *key = read_field(txn->data);
+	if (txn->data->size != 0)
+		tnt_raise(IllegalParams, :"can't unpack request");
+
+	txn->old_tuple = [txn->index find: key];
+	if (txn->old_tuple) {
+		commit_delete(txn);
+	}
+	txn_result_tuple(txn, txn->old_tuple);
+}
+
+/**
+ * Delete a tuple from all indexes.
+ */
+static void
+commit_delete(struct box_txn *txn)
+{
+	/* delete a tuple from all indexes */
+	int n = index_count(txn->sp);
+	for (int i = 0; i < n; i++) {
+		Index *index = txn->sp->index[i];
+		@try {
+			[index remove: txn->old_tuple];
+		} @catch (...) {
+			rollback_replace(txn, i, NULL, txn->old_tuple);
+			@throw;
+		}
+	}
+
+	/* register deleted tuple for rollback */
+	txn->flags |= BOX_INDEXES_UPDATED;
+}
+
+@implementation TxnPort
+
++ (id) alloc
+{
+	static TxnPort *result = nil;
+	if (result == nil) {
+		size_t size = class_getInstanceSize(self);
+		result = malloc(size);
+		if (result == NULL)
+			panic("can't allocate TxnPort");
+		memset(result, 0, size);
+		result->isa = self;
+	}
+	return result;
+}
+
+- (void) add_u32: (u32 *) u32
+{
+	(void) u32;
+}
+
+- (void) dup_u32: (u32) u32
+{
+	(void) u32;
+}
+
+- (void) add_tuple: (struct box_tuple *) tuple
+{
+	(void) tuple;
+}
+
+@end
+
+@implementation TxnOutPort
+
++ (id) alloc
+{
+	static TxnOutPort *result = nil;
+	if (result == nil) {
+		size_t size = class_getInstanceSize(self);
+		result = malloc(size);
+		if (result == NULL)
+			panic("can't allocate TxnOutPort");
+		memset(result, 0, size);
+		result->isa = self;
+	}
+	return result;
+}
+
+- (void) add_u32: (u32 *) pu32
+{
+	iov_add(pu32, sizeof(u32));
+}
+
+- (void) dup_u32: (u32) u32
+{
+	iov_dup(&u32, sizeof(u32));
+}
+
+- (void) add_tuple: (struct box_tuple *) tuple
+{
+	size_t len = tuple_len(tuple);
+
+	if (len > BOX_REF_THRESHOLD) {
+		iov_add(&tuple->bsize, len);
+	} else {
+		iov_dup(&tuple->bsize, len);
+	}
+}
+
+@end
+
+
+/**
+ * Allocate a transaction.
+ */
+static struct box_txn *
+txn_alloc(void)
+{
+	// TODO: slab or malloc & cache manually
+	struct box_txn *txn = malloc(sizeof(struct box_txn));
+	if (txn == NULL) {
+		panic("can't allocate txn");
+	}
+	memset(txn, 0, sizeof(struct box_txn));
+	return txn;
+}
+
+/**
+ * Bind the transaction to the fiber that created it.
+ */
+static void
+txn_fiber_attach(struct box_txn *txn)
+{
+	assert(fiber->mod_data.txn == NULL);
+	fiber->mod_data.txn = txn;
+	txn->client = fiber;
+}
+
+/**
+ * Cut off the transaction from its parent fiber.
+ */
+static void
+txn_fiber_detach(struct box_txn *txn)
+{
+	assert(txn->client->mod_data.txn == txn);
+	txn->client->mod_data.txn = NULL;
+	txn->client = NULL;
+}
+
+
+/**
+ * Start a transaction. This function established a transaction context for
+ * the currently executing fiber. The fiber must have no context before this
+ * call. The context will be used by the following txn_process_ro/rw call.
+ * This call is optional as txn_process_ro/rw would establish a default
+ * transaction context if it is not present already.
+ */
+struct box_txn *
+txn_begin(int flags, TxnPort *port)
+{
+	struct box_txn *txn = txn_alloc();
+	txn->flags = flags;
+	txn->out = port;
+
+	txn_fiber_attach(txn);
+
+	return txn;
+}
+
+void txn_assign_n(struct box_txn *txn, u32 n, u32 idx_n)
+{
+	if (n >= BOX_SPACE_MAX)
+		tnt_raise(ClientError, :ER_NO_SUCH_SPACE, n);
+	txn->sp = &space[n];
+
+	if (!txn->sp->enabled)
+		tnt_raise(ClientError, :ER_SPACE_DISABLED, n);
+
+	if (idx_n >= txn->sp->key_count)
+		tnt_raise(LoggedError, :ER_NO_SUCH_INDEX, idx_n, n);
+	txn->index = txn->sp->index[idx_n];
+}
+
+
+
+/**
+ * Initialize transaction with requested space and default index.
+ */
+static void
+txn_assign_spc(struct box_txn *txn)
+{
+	u32 spc_n = read_u32(txn->data);
+	txn_assign_n(txn, spc_n, 0);
+}
+
+/** Remember op code/request in the txn. */
+static void
+txn_set_op(struct box_txn *txn, u32 op, struct tbuf *data)
+{
+	assert(txn->state == TXN_INITIAL);
+
+	txn->op = op;
+	txn->data = data;
+	txn->orig_data = data->data;
+	txn->orig_size = data->size;
+	txn->client = fiber;
+}
+
+
+/**
+ * Initialize transaction with requested space and requested index.
+ */
+static void
+txn_assign_spc_idx(struct box_txn *txn)
+{
+	u32 spc_n = read_u32(txn->data);
+	u32 idx_n = read_u32(txn->data);
+	txn_assign_n(txn, spc_n, idx_n);
+}
+
+/**
+ * Cleanup finished transaction.
+ */
+static void
+txn_cleanup(struct box_txn *txn)
+{
+	assert(txn->state == TXN_FINISHED);
+	txn_release_disused(txn, (txn->flags & BOX_ABORTED_TXN) != 0);
+	txn_drop(txn);
+}
+
+
+void
+txn_commit(struct box_txn *txn)
+{
+	assert(txn->state == TXN_PENDING);
+	@try {
+		txn->state = TXN_LOGGING;
+		txn_wal_write(txn);
+	}
+	@catch (id e) {
+		txn_abort(txn);
+	}
+}
+
+/**
+ * Dispatch a request in the read-write context.
+ */
+static void
+txn_dispatch_rw(struct box_txn *txn)
+{
+	say_debug("txn_prepare_rw(%i)", txn->op);
+
+	switch (txn->op) {
+	case REPLACE:
+		prepare_replace(txn);
+		break;
+
+	case DELETE:
+	case DELETE_1_3:
+		prepare_delete(txn);
+		break;
+
+	case SELECT:
+		process_select(txn);
+		break;
+
+	case UPDATE:
+		prepare_update(txn);
+		break;
+
+	default:
+		say_error("box_dispatch: unsupported command = %" PRIi32 "", txn->op);
+		tnt_raise(IllegalParams, :"unsupported command code, check the error log");
+	}
+}
+
+static int
+box_xlog_sprint(struct tbuf *buf, const struct tbuf *t)
+{
+	struct row_v11 *row = row_v11(t);
+
+	struct tbuf *b = palloc(fiber->gc_pool, sizeof(*b));
+	b->data = row->data;
+	b->size = row->len;
+	u16 tag, op;
+	u64 cookie;
+	struct sockaddr_in *peer = (void *)&cookie;
+
+	u32 n, key_len;
+	void *key;
+	u32 cardinality, field_no;
+	u32 flags;
+	u32 op_cnt;
+
+	tbuf_printf(buf, "lsn:%" PRIi64 " ", row->lsn);
+
+	say_debug("b->len:%" PRIu32, b->size);
+
+	tag = read_u16(b);
+	cookie = read_u64(b);
+	op = read_u16(b);
+	n = read_u32(b);
+
+	tbuf_printf(buf, "tm:%.3f t:%" PRIu16 " %s:%d %s n:%i",
+		    row->tm, tag, inet_ntoa(peer->sin_addr), ntohs(peer->sin_port),
+		    messages_strs[op], n);
+
+	switch (op) {
+	case REPLACE:
+		flags = read_u32(b);
+		cardinality = read_u32(b);
+		if (b->size != valid_tuple(b, cardinality))
+			abort();
+		tuple_print(buf, cardinality, b->data);
+		break;
+
+	case DELETE:
+		flags = read_u32(b);
+	case DELETE_1_3:
+		key_len = read_u32(b);
+		key = read_field(b);
+		if (b->size != 0)
+			abort();
+		tuple_print(buf, key_len, key);
+		break;
+
+	case UPDATE:
+		flags = read_u32(b);
+		key_len = read_u32(b);
+		key = read_field(b);
+		op_cnt = read_u32(b);
+
+		tbuf_printf(buf, "flags:%08X ", flags);
+		tuple_print(buf, key_len, key);
+
+		while (op_cnt-- > 0) {
+			field_no = read_u32(b);
+			u8 op = read_u8(b);
+			void *arg = read_field(b);
+
+			tbuf_printf(buf, " [field_no:%i op:", field_no);
+			switch (op) {
+			case 0:
+				tbuf_printf(buf, "set ");
+				break;
+			case 1:
+				tbuf_printf(buf, "add ");
+				break;
+			case 2:
+				tbuf_printf(buf, "and ");
+				break;
+			case 3:
+				tbuf_printf(buf, "xor ");
+				break;
+			case 4:
+				tbuf_printf(buf, "or ");
+				break;
+			}
+			tuple_print(buf, 1, arg);
+			tbuf_printf(buf, "] ");
+		}
+		break;
+	default:
+		tbuf_printf(buf, "unknown wal op %" PRIi32, op);
+	}
+	return 0;
+}
+
+
+static int
+snap_print(struct recovery_state *r __attribute__((unused)), struct tbuf *t)
+{
+	struct tbuf *out = tbuf_alloc(t->pool);
+	struct box_snap_row *row;
+	struct row_v11 *raw_row = row_v11(t);
+
+	struct tbuf *b = palloc(fiber->gc_pool, sizeof(*b));
+	b->data = raw_row->data;
+	b->size = raw_row->len;
+
+	(void)read_u16(b); /* drop tag */
+	(void)read_u64(b); /* drop cookie */
+
+	row = box_snap_row(b);
+
+	tuple_print(out, row->tuple_size, row->data);
+	printf("n:%i %*s\n", row->space, (int) out->size, (char *)out->data);
+	return 0;
+}
+
+static int
+xlog_print(struct recovery_state *r __attribute__((unused)), struct tbuf *t)
+{
+	struct tbuf *out = tbuf_alloc(t->pool);
+	int res = box_xlog_sprint(out, t);
+	if (res >= 0)
+		printf("%*s\n", (int)out->size, (char *)out->data);
+	return res;
+}
+
+/** Free a key definition. */
+static void
+key_free(struct key_def *key_def)
+{
+	free(key_def->parts);
+	free(key_def->cmp_order);
+}
+
+static void
+space_free(void)
+{
+	int i;
+	for (i = 0 ; i < BOX_SPACE_MAX ; i++) {
+		if (!space[i].enabled)
+			continue;
+
+		int j;
+		for (j = 0 ; j < space[i].key_count; j++) {
+			Index *index = space[i].index[j];
+			[index free];
+			key_free(&space[i].key_defs[j]);
+		}
+
+		free(space[i].key_defs);
+		free(space[i].field_types);
+	}
+}
+
+static void
+key_init(struct key_def *def, struct tarantool_cfg_space_index *cfg_index)
+{
+	def->max_fieldno = 0;
+	def->part_count = 0;
+
+	/* Calculate key cardinality and maximal field number. */
+	for (int k = 0; cfg_index->key_field[k] != NULL; ++k) {
+		typeof(cfg_index->key_field[k]) cfg_key = cfg_index->key_field[k];
+
+		if (cfg_key->fieldno == -1) {
+			/* last filled key reached */
+			break;
+		}
+
+		def->max_fieldno = MAX(def->max_fieldno, cfg_key->fieldno);
+		def->part_count++;
+	}
+
+	/* init def array */
+	def->parts = malloc(sizeof(struct key_part) * def->part_count);
+	if (def->parts == NULL) {
+		panic("can't allocate def parts array for index");
+	}
+
+	/* init compare order array */
+	def->max_fieldno++;
+	def->cmp_order = malloc(def->max_fieldno * sizeof(u32));
+	if (def->cmp_order == NULL) {
+		panic("can't allocate def cmp_order array for index");
+	}
+	memset(def->cmp_order, -1, def->max_fieldno * sizeof(u32));
+
+	/* fill fields and compare order */
+	for (int k = 0; cfg_index->key_field[k] != NULL; ++k) {
+		typeof(cfg_index->key_field[k]) cfg_key = cfg_index->key_field[k];
+
+		if (cfg_key->fieldno == -1) {
+			/* last filled key reached */
+			break;
+		}
+
+		/* fill keys */
+		def->parts[k].fieldno = cfg_key->fieldno;
+		def->parts[k].type = STR2ENUM(field_data_type, cfg_key->type);
+		/* fill compare order */
+		def->cmp_order[cfg_key->fieldno] = k;
+	}
+	def->is_unique = cfg_index->unique;
+}
+
 /**
  * Extract all available field info from keys
  *
@@ -1164,6 +1573,49 @@ build_indexes(void)
 		say_info("Space %"PRIu32": done", n);
 	}
 }
+
+static void
+box_process_ro(u32 op, struct tbuf *data)
+{
+	stat_collect(stat_base, op, 1);
+	txn_process_ro(op, data);
+}
+
+static void
+box_process_rw(u32 op, struct tbuf *data)
+{
+	stat_collect(stat_base, op, 1);
+	txn_process_rw(op, data);
+}
+
+static void
+box_process_call(struct tbuf *data)
+{
+	stat_collect(stat_base, CALL, 1);
+	box_lua_call(data);
+}
+
+static void
+box_process_lro(u32 op, struct tbuf *data)
+{
+	if (op == CALL) {
+		box_process_call(data);
+	} else {
+		box_process_ro(op, data);
+	}
+}
+
+static void
+box_process_lrw(u32 op, struct tbuf *data)
+{
+	if (op == CALL) {
+		box_process_call(data);
+	} else {
+		box_process_rw(op, data);
+	}
+}
+
+
 
 static struct tbuf *
 convert_snap_row_to_wal(struct tbuf *t)
@@ -1621,6 +2073,12 @@ mod_init(void)
 			     memcached_handler, NULL, NULL);
 }
 
+int
+mod_cat(const char *filename)
+{
+	return read_log(filename, xlog_print, snap_print, NULL);
+}
+
 static void
 snapshot_write_tuple(struct log_io_iter *i, unsigned n, struct box_tuple *tuple)
 {
@@ -1677,14 +2135,10 @@ mod_info(struct tbuf *out)
 	txn_info(out);
 }
 
-
-
 /* Transaction log */
 static u64 txn_initiated_commits;
 static u64 txn_completed_commits;
 static bool txn_broken_log;
-
-/* {{{ Transaction utilities. *************************************/
 
 /**
  * Check if the executed transaction requires rollback.
@@ -1709,32 +2163,6 @@ txn_requires_commit(struct box_txn *txn)
 		return false;
 	return txn_requires_rollback(txn);
 }
-
-/**
- * Bind the transaction to the fiber that created it.
- */
-static void
-txn_fiber_attach(struct box_txn *txn)
-{
-	assert(fiber->mod_data.txn == NULL);
-	fiber->mod_data.txn = txn;
-	txn->client = fiber;
-}
-
-/**
- * Cut off the transaction from its parent fiber.
- */
-static void
-txn_fiber_detach(struct box_txn *txn)
-{
-	assert(txn->client->mod_data.txn == txn);
-	txn->client->mod_data.txn = NULL;
-	txn->client = NULL;
-}
-
-/** }}} */
-
-/* {{{ Transaction pipeline. **************************************/
 
 /* Transaction processing queue. */
 static struct box_txn *txn_first;
@@ -1800,10 +2228,6 @@ txn_queue_insert_before(struct box_txn *txn, struct box_txn *before)
 	}
 	before->process_prev = txn;
 }
-
-/** }}} */
-
-/* {{{ Transaction processing internal routines. ******************/
 
 /**
  * Indicate that all the necesaary job for the transaction is completed
@@ -1977,7 +2401,7 @@ txn_dispatch_ro(struct box_txn *txn)
 
 	switch (txn->op) {
 	case SELECT:
-		txn_execute_select(txn);
+		process_select(txn);
 		break;
 
 	case DELETE:
@@ -1990,99 +2414,6 @@ txn_dispatch_ro(struct box_txn *txn)
 		say_error("box_dispatch: unsupported command = %" PRIi32 "", txn->op);
 		tnt_raise(IllegalParams, :"unsupported command code, check the error log");
 	}
-}
-
-/**
- * Dispatch a request in the read-write context.
- */
-static void
-txn_dispatch_rw(struct box_txn *txn)
-{
-	say_debug("txn_prepare_rw(%i)", txn->op);
-
-	switch (txn->op) {
-	case SELECT:
-		txn_execute_select(txn);
-		break;
-
-	case DELETE:
-	case DELETE_1_3:
-		txn_execute_delete(txn);
-		break;
-
-	case UPDATE:
-		txn_execute_update(txn);
-		break;
-
-	case REPLACE:
-		txn_execute_replace(txn);
-		break;
-
-	default:
-		say_error("box_dispatch: unsupported command = %" PRIi32 "", txn->op);
-		tnt_raise(IllegalParams, :"unsupported command code, check the error log");
-	}
-}
-
-/**
- * Initiate writing to the transaction log.
- */
-static void
-txn_commit(struct box_txn *txn)
-{
-	assert(txn->state == TXN_PENDING);
-	@try {
-		txn->state = TXN_LOGGING;
-		txn_wal_write(txn);
-	}
-	@catch (id e) {
-		txn_abort(txn);
-	}
-}
-
-/**
- * Cleanup finished transaction.
- */
-static void
-txn_cleanup(struct box_txn *txn)
-{
-	assert(txn->state == TXN_FINISHED);
-	txn_release_disused(txn, (txn->flags & BOX_ABORTED_TXN) != 0);
-	txn_drop(txn);
-}
-
-/** }}} */
-
-/* {{{ Transaction initiation routines. ***************************/
-
-/**
- * Allocate a transaction.
- */
-static struct box_txn *
-txn_alloc(void)
-{
-	// TODO: slab or malloc & cache manually
-	struct box_txn *txn = malloc(sizeof(struct box_txn));
-	if (txn == NULL) {
-		panic("can't allocate txn");
-	}
-	memset(txn, 0, sizeof(struct box_txn));
-	return txn;
-}
-
-/**
- * Initialize transaction data.
- */
-static void
-txn_set_data(struct box_txn *txn, u32 op, struct tbuf *data)
-{
-	assert(txn->state == TXN_INITIAL);
-
-	txn->op = op;
-	txn->data = data;
-	txn->orig_data = data->data;
-	txn->orig_size = data->size;
-	txn->client = fiber;
 }
 
 /**
@@ -2129,57 +2460,6 @@ txn_rollback_single(struct box_txn *txn)
 	txn_release_disused(txn, true);
 }
 
-/**
- * Process a request.
- */
-static void
-txn_process(u32 op, struct tbuf *data, void (*dispatcher)(struct box_txn *txn))
-{
-	ev_tstamp start = ev_now();
-
-	/* ensure that a transaction context is established */
-	struct box_txn *txn = in_txn();
-	if (txn == NULL) {
-		txn = txn_begin(BOX_GC_TXN, [TxnOutPort new]);
-	}
-
-	@try {
-		/* initialize the transaction */
-		txn_set_data(txn, op, data);
-
-		/* execute the transaction */
-		dispatcher(txn);
-
-		/* register for commit and cleanup */
-		txn_queue_append(txn);
-
-		/* initiate commit and result delivery */
-		if (txn_requires_commit(txn)) {
-			txn_wait_commit(txn);
-		} else {
-			txn_deliver(txn);
-		}
-	}
-	@catch (id e) {
-		/* drop the transaction if it is not queued yet,
-		   otherwise it will be dropped by the cleanup fiber */
-		if (txn->state == TXN_INITIAL) {
-			if (txn_requires_rollback(txn)) {
-				txn_rollback_single(txn);
-			}
-			txn_drop(txn);
-		}
-		@throw;
-	}
-	@finally {
-		box_check_request_time(op, start, ev_now());
-	}
-}
-
-/** }}} */
-
-/* {{{ Transaction processing fibers. *****************************/
-
 /* Transaction processing fibers. */
 static struct fiber *txn_commit_fiber;
 static struct fiber *txn_cleanup_fiber;
@@ -2221,6 +2501,53 @@ txn_commit_loop(void *data __attribute__((unused)))
 
 		fiber_yield();
 		fiber_testcancel();
+	}
+}
+
+/**
+ * Process a request.
+ */
+static void
+txn_process(u32 op, struct tbuf *data, void (*dispatcher)(struct box_txn *txn))
+{
+	ev_tstamp start = ev_now();
+
+	/* ensure that a transaction context is established */
+	struct box_txn *txn = in_txn();
+	if (txn == NULL) {
+		txn = txn_begin(BOX_GC_TXN, [TxnOutPort new]);
+	}
+
+	@try {
+		/* initialize the transaction */
+		txn_set_op(txn, op, data);
+
+		/* execute the transaction */
+		dispatcher(txn);
+
+		/* register for commit and cleanup */
+		txn_queue_append(txn);
+
+		/* initiate commit and result delivery */
+		if (txn_requires_commit(txn)) {
+			txn_wait_commit(txn);
+		} else {
+			txn_deliver(txn);
+		}
+	}
+	@catch (id e) {
+		/* drop the transaction if it is not queued yet,
+		   otherwise it will be dropped by the cleanup fiber */
+		if (txn->state == TXN_INITIAL) {
+			if (txn_requires_rollback(txn)) {
+				txn_rollback_single(txn);
+			}
+			txn_drop(txn);
+		}
+		@throw;
+	}
+	@finally {
+		box_check_request_time(op, start, ev_now());
 	}
 }
 
@@ -2273,29 +2600,6 @@ txn_create_fiber(const char *name, void (*loop)(void *), ev_prepare *ev)
 	ev->data = fiber;
 
 	return fiber;
-}
-
-/** }}} */
-
-/* {{{ Transaction handling. **************************************/
-
-/**
- * Start a transaction. This function established a transaction context for
- * the currently executing fiber. The fiber must have no context before this
- * call. The context will be used by the following txn_process_ro/rw call.
- * This call is optional as txn_process_ro/rw would establish a default
- * transaction context if it is not present already.
- */
-struct box_txn *
-txn_begin(int flags, TxnPort *port)
-{
-	struct box_txn *txn = txn_alloc();
-	txn->flags = flags;
-	txn->out = port;
-
-	txn_fiber_attach(txn);
-
-	return txn;
 }
 
 /**
@@ -2354,10 +2658,6 @@ txn_mock(struct box_txn *txn)
 	/* trigger result delivery */
 	txn_deliver(txn);
 }
-
-/** }}} */
-
-/* {{{ General transaction subsystem control. *********************/
 
 /**
  * Initialize transaction module.
@@ -2428,288 +2728,6 @@ txn_info(struct tbuf *out)
 		    (unsigned long long) txn_completed_commits);
 }
 
-/** }}} */
-
-
-
-/* {{{ Support of update ops. *************************************/
-
-static int
-box_xlog_sprint(struct tbuf *buf, const struct tbuf *t)
-{
-	struct row_v11 *row = row_v11(t);
-
-	struct tbuf *b = palloc(fiber->gc_pool, sizeof(*b));
-	b->data = row->data;
-	b->size = row->len;
-	u16 tag, op;
-	u64 cookie;
-	struct sockaddr_in *peer = (void *)&cookie;
-
-	u32 n, key_len;
-	void *key;
-	u32 cardinality, field_no;
-	u32 flags;
-	u32 op_cnt;
-
-	tbuf_printf(buf, "lsn:%" PRIi64 " ", row->lsn);
-
-	say_debug("b->len:%" PRIu32, b->size);
-
-	tag = read_u16(b);
-	cookie = read_u64(b);
-	op = read_u16(b);
-	n = read_u32(b);
-
-	tbuf_printf(buf, "tm:%.3f t:%" PRIu16 " %s:%d %s n:%i",
-		    row->tm, tag, inet_ntoa(peer->sin_addr), ntohs(peer->sin_port),
-		    messages_strs[op], n);
-
-	switch (op) {
-	case REPLACE:
-		flags = read_u32(b);
-		cardinality = read_u32(b);
-		if (b->size != valid_tuple(b, cardinality))
-			abort();
-		tuple_print(buf, cardinality, b->data);
-		break;
-
-	case DELETE:
-		flags = read_u32(b);
-	case DELETE_1_3:
-		key_len = read_u32(b);
-		key = read_field(b);
-		if (b->size != 0)
-			abort();
-		tuple_print(buf, key_len, key);
-		break;
-
-	case UPDATE:
-		flags = read_u32(b);
-		key_len = read_u32(b);
-		key = read_field(b);
-		op_cnt = read_u32(b);
-
-		tbuf_printf(buf, "flags:%08X ", flags);
-		tuple_print(buf, key_len, key);
-
-		while (op_cnt-- > 0) {
-			field_no = read_u32(b);
-			u8 op = read_u8(b);
-			void *arg = read_field(b);
-
-			tbuf_printf(buf, " [field_no:%i op:", field_no);
-			switch (op) {
-			case 0:
-				tbuf_printf(buf, "set ");
-				break;
-			case 1:
-				tbuf_printf(buf, "add ");
-				break;
-			case 2:
-				tbuf_printf(buf, "and ");
-				break;
-			case 3:
-				tbuf_printf(buf, "xor ");
-				break;
-			case 4:
-				tbuf_printf(buf, "or ");
-				break;
-			}
-			tuple_print(buf, 1, arg);
-			tbuf_printf(buf, "] ");
-		}
-		break;
-	default:
-		tbuf_printf(buf, "unknown wal op %" PRIi32, op);
-	}
-	return 0;
-}
-
-
-static int
-snap_print(struct recovery_state *r __attribute__((unused)), struct tbuf *t)
-{
-	struct tbuf *out = tbuf_alloc(t->pool);
-	struct box_snap_row *row;
-	struct row_v11 *raw_row = row_v11(t);
-
-	struct tbuf *b = palloc(fiber->gc_pool, sizeof(*b));
-	b->data = raw_row->data;
-	b->size = raw_row->len;
-
-	(void)read_u16(b); /* drop tag */
-	(void)read_u64(b); /* drop cookie */
-
-	row = box_snap_row(b);
-
-	tuple_print(out, row->tuple_size, row->data);
-	printf("n:%i %*s\n", row->space, (int) out->size, (char *)out->data);
-	return 0;
-}
-
-static int
-xlog_print(struct recovery_state *r __attribute__((unused)), struct tbuf *t)
-{
-	struct tbuf *out = tbuf_alloc(t->pool);
-	int res = box_xlog_sprint(out, t);
-	if (res >= 0)
-		printf("%*s\n", (int)out->size, (char *)out->data);
-	return res;
-}
-
-int
-mod_cat(const char *filename)
-{
-	return read_log(filename, xlog_print, snap_print, NULL);
-}
-
-/**
- * Delete a tuple from all indexes.
- */
-static void
-txn_delete_tuple(struct box_txn *txn)
-{
-	/* delete a tuple from all indexes */
-	int n = index_count(txn->space);
-	for (int i = 0; i < n; i++) {
-		Index *index = txn->space->index[i];
-		@try {
-			[index remove: txn->old_tuple];
-		} @catch (...) {
-			txn_recover_indexes(txn, i, NULL, txn->old_tuple);
-			@throw;
-		}
-	}
-
-	/* register deleted tuple for rollback */
-	txn->flags |= BOX_INDEXES_UPDATED;
-}
-
-
-/** }}} */
-
-/* {{{ OPs initialization. ****************************************/
-
-/** }}} */
-
-/* {{{ OPs implementation. ****************************************/
-
-/**
- * Execute DELETE request.
- */
-void
-txn_execute_delete(struct box_txn *txn)
-{
-	txn_assign_spc(txn);
-
-	if (txn->op == DELETE)
-		txn->flags |= read_u32(txn->data) & BOX_ALLOWED_REQUEST_FLAGS;
-
-	u32 key_len = read_u32(txn->data);
-	if (key_len != 1)
-		tnt_raise(IllegalParams, :"key must be single valued");
-	void *key = read_field(txn->data);
-	if (txn->data->size != 0)
-		tnt_raise(IllegalParams, :"can't unpack request");
-
-	txn->old_tuple = [txn->index find: key];
-	if (txn->old_tuple) {
-		txn_delete_tuple(txn);
-	}
-	txn_result_tuple(txn, txn->old_tuple);
-}
-
-/**
- * Execute UPDATE request.
- */
-void
-txn_execute_update(struct box_txn *txn)
-{
-	txn_assign_spc(txn);
-
-	txn->flags |= read_u32(txn->data) & BOX_ALLOWED_REQUEST_FLAGS;
-
-	/* Parse UPDATE request. */
-	struct update_cmd *cmd = parse_update_cmd(txn->data);
-
-	/* Try to find the tuple. */
-	txn->old_tuple = [txn->index find: get_update_key(cmd)];
-	if (txn->old_tuple != NULL) {
-		init_update_operations(txn, cmd);
-
-		txn->tuple = txn_alloc_tuple(get_update_tuple_len(cmd));
-		do_update(txn, cmd);
-		validate_indexes(txn, txn->old_tuple, txn->tuple);
-
-		txn_replace_tuple(txn);
-	}
-	txn_result_tuple(txn, txn->tuple);
-}
-
-/**
- * Execute SELECT request.
- */
-void
-txn_execute_select(struct box_txn *txn)
-{
-	ERROR_INJECT(ERRINJ_TESTING);
-
-	txn_assign_spc_idx(txn);
-
-	u32 offset = read_u32(txn->data);
-	u32 limit = read_u32(txn->data);
-	u32 count = read_u32(txn->data);
-	if (count == 0)
-		tnt_raise(IllegalParams, :"tuple count must be positive");
-
-	uint32_t *found = palloc(fiber->gc_pool, sizeof(*found));
-	[txn->out add_u32: found];
-	*found = 0;
-
-	for (u32 i = 0; i < count; i++) {
-
-		Index *index = txn->index;
-		/* End the loop if reached the limit. */
-		if (limit == *found)
-			return;
-
-		void *key = NULL;
-		u32 key_cardinality = read_u32(txn->data);
-		if (key_cardinality) {
-			if (key_cardinality > index->key_def->part_count) {
-				tnt_raise(ClientError, :ER_KEY_CARDINALITY,
-					  key_cardinality,
-					  index->key_def->part_count);
-			}
-
-			key = read_field(txn->data);
-
-			/* advance remaining fields of a key */
-			for (int i = 1; i < key_cardinality; i++)
-				read_field(txn->data);
-		}
-
-		struct iterator *it = index->position;
-		[index initIterator: it :key :key_cardinality];
-
-		struct box_tuple *tuple = it->next_equal(it);
-		while (tuple != NULL && offset > 0) {
-			tuple = it->next_equal(it);
-			--offset;
-		}
-		while (tuple != NULL && *found < limit) {
-			[txn->out add_tuple: tuple];
-			tuple = it->next_equal(it);
-			++(*found);
-		}
-	}
-
-	if (txn->data->size != 0) {
-		tnt_raise(IllegalParams, :"can't unpack request");
-	}
-}
-
 /**
  * Restore indexes on transaction rollback.
  */
@@ -2717,7 +2735,7 @@ void
 txn_restore_indexes(struct box_txn *txn)
 {
 	if ((txn->flags & BOX_INDEXES_UPDATED) != 0) {
-		txn_recover_indexes(txn, index_count(txn->space),
+		rollback_replace(txn, index_count(txn->sp),
 				    txn->tuple, txn->old_tuple);
 		txn->flags &= ~BOX_INDEXES_UPDATED;
 	}
@@ -2735,123 +2753,22 @@ txn_release_disused(struct box_txn *txn, bool rollback)
 	}
 }
 
-/** }}} */
 
-#include <objc/objc.h>
-#include <objc/runtime.h>
-
-
-@implementation TxnPort
-
-+ (id) alloc
+/**
+ * Handle single-tuple result.
+ */
+static void
+txn_result_tuple(struct box_txn *txn, struct box_tuple *tuple)
 {
-	static TxnPort *result = nil;
-	if (result == nil) {
-		size_t size = class_getInstanceSize(self);
-		result = malloc(size);
-		if (result == NULL)
-			panic("can't allocate TxnPort");
-		memset(result, 0, size);
-		result->isa = self;
-	}
-	return result;
-}
-
-- (void) add_u32: (u32 *) u32
-{
-	(void) u32;
-}
-
-- (void) dup_u32: (u32) u32
-{
-	(void) u32;
-}
-
-- (void) add_tuple: (struct box_tuple *) tuple
-{
-	(void) tuple;
-}
-
-@end
-
-@implementation TxnOutPort
-
-+ (id) alloc
-{
-	static TxnOutPort *result = nil;
-	if (result == nil) {
-		size_t size = class_getInstanceSize(self);
-		result = malloc(size);
-		if (result == NULL)
-			panic("can't allocate TxnOutPort");
-		memset(result, 0, size);
-		result->isa = self;
-	}
-	return result;
-}
-
-- (void) add_u32: (u32 *) pu32
-{
-	iov_add(pu32, sizeof(u32));
-}
-
-- (void) dup_u32: (u32) u32
-{
-	iov_dup(&u32, sizeof(u32));
-}
-
-- (void) add_tuple: (struct box_tuple *) tuple
-{
-	size_t len = tuple_len(tuple);
-	if (len > BOX_REF_THRESHOLD) {
-		iov_add(&tuple->bsize, len);
+	if (tuple == NULL) {
+		[txn->out dup_u32: 0];
 	} else {
-		iov_dup(&tuple->bsize, len);
+		[txn->out dup_u32: 1];
+		if ((txn->flags & BOX_RETURN_TUPLE) != 0) {
+			[txn->out add_tuple: tuple];
+		}
 	}
 }
-
-@end
-
-@implementation TxnLuaPort
-
-- (id) init: (struct lua_State *) l
-{
-	self = [super init];
-	self->L = l;
-	return self;
-}
-
-+ (id) alloc
-{
-	size_t size = class_getInstanceSize(self);
-	TxnLuaPort *result = p0alloc(fiber->gc_pool, size);
-	result->isa = self;
-	return result;
-}
-
-- (void) dup_u32: (u32) u32
-{
-	/*
-	 * Do nothing -- the only u32 Box can give us is
-	 * tuple count, and we don't need it, since we intercept
-	 * everything into Lua stack first.
-	 * @sa iov_add_multret
-	 */
-	(void) u32;
-}
-
-- (void) add_u32: (u32 *) pu32
-{
-	/* See the comment in dup_u32. */
-	(void) pu32;
-}
-
-- (void) add_tuple: (struct box_tuple *) tuple
-{
-	lbox_pushtuple(L, tuple);
-}
-
-@end
 
 
 /**
