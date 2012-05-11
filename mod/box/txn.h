@@ -72,7 +72,7 @@ struct box_txn {
 	struct box_txn *process_prev;
 
 	/* inserted and removed tuples */
-	struct box_tuple *new_tuple;
+	struct box_tuple *tuple;
 	struct box_tuple *old_tuple;
 };
 

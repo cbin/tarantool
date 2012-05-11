@@ -144,8 +144,6 @@ ENUM(update_op_codes, UPDATE_OP_CODES);
 extern iproto_callback rw_callback;
 extern iproto_callback lrw_callback;
 
-extern bool secondary_indexes_enabled;
-
 /**
  * Get space ordinal number.
  */
@@ -182,24 +180,6 @@ static inline bool
 index_is_primary(Index *index)
 {
 	return index_n(index) == 0;
-}
-
-/**
- * Get active index count.
- */
-static inline int
-index_count(struct space *sp)
-{
-	if (!secondary_indexes_enabled) {
-		/* If the secondary indexes are not enabled yet
-		   then we can use only the primary index. So
-		   return 1 if there is at least one index (which
-		   must be primary) and return 0 otherwise. */
-		return sp->key_count > 0;
-	} else {
-		/* Return the actual number of indexes. */
-		return sp->key_count;
-	}
 }
 
 void box_check_request_time(u32 op, ev_tstamp start, ev_tstamp stop);
