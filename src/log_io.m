@@ -376,9 +376,10 @@ restart:
 	}
 	marker_offset = ftello(l->f) - sizeof(l->class->marker);
 	if (i->good_offset != marker_offset)
-		say_warn("skipped %" PRI_OFFT " bytes after 0x%08" PRI_XFFT " offset",
-			 marker_offset - i->good_offset, i->good_offset);
-	say_debug("magic found at 0x%08" PRI_XFFT, marker_offset);
+		say_warn("skipped %llu  bytes after 0x%08llx offset",
+			(unsigned long long) (marker_offset - i->good_offset),
+			(unsigned long long) i->good_offset);
+	say_debug("magic found at 0x%08llx", (unsigned long long) marker_offset);
 
 	struct tbuf *row = row_reader_v11(l->f, fiber->gc_pool);
 	if (row == ROW_EOF)

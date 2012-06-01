@@ -22,7 +22,7 @@ endif()
 #
 # libev uses ceil and floor from the standard math library
 #
-target_link_libraries(ev m rt)
+target_link_libraries(ev m)
 
 #
 # Build admin.m from admin.rl, but only if admin.rl was changed.
@@ -96,7 +96,10 @@ if (ENABLE_GCOV)
 endif()
 
 if (ENABLE_BACKTRACE AND HAVE_BFD)
-  set (common_libraries ${common_libraries} bfd iberty)
+  set (common_libraries ${common_libraries} bfd)
+  if (NOT TARGET_OS_DARWIN)
+    set (common_libraries ${common_libraries} iberty)
+  endif()
   if (ENABLE_STATIC OR TARGET_OS_FREEBSD)
      include (FindZLIB)
      set (common_libraries ${common_libraries} ${ZLIB_LIBRARIES})
