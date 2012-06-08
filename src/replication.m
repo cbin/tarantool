@@ -37,6 +37,8 @@
 #include <sys/uio.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
+
 #include "fiber.h"
 
 /** Replication topology
@@ -255,6 +257,13 @@ acceptor_handler(void *data __attribute__((unused)))
 				continue;
 			}
 			panic_syserror("accept");
+		}
+		int sflags = fcntl(client_sock, F_GETFL, 0);
+		if (sflags < 0)
+			say_syserror("fcntl F_GETFL");
+		else if (sflags & O_NONBLOCK) {
+			if (fcntl(client_sock, F_SETFL, sflags & ~O_NONBLOCK) < 0)
+				say_syserror("fcntl F_SETFL");
 		}
 
 		/* up SO_KEEPALIVE flag */

@@ -134,6 +134,11 @@ tnt_xrealloc(void *ptr, size_t size)
 
 static char backtrace_buf[4096 * 4];
 
+#ifdef HAVE_BFD
+static struct symbol *symbols;
+static ssize_t symbol_count;
+#endif
+
 /*
  * note, stack unwinding code assumes that binary is compiled with frame pointers
  */
@@ -218,8 +223,6 @@ assert_fail(const char *assertion, const char *file, unsigned int line, const ch
 }
 
 #ifdef HAVE_BFD
-static struct symbol *symbols;
-static ssize_t symbol_count;
 
 int
 compare_symbol(const void *_a, const void *_b)
@@ -273,8 +276,11 @@ symbols_load(const char *name)
 		vma = bfd_get_section_vma(h, section);
 		size = bfd_get_section_size(section);
 
-		if (symbol_table[i]->flags & BSF_FUNCTION &&
-		    vma + symbol_table[i]->value > 0 &&
+		/* On ELF (but not elsewhere) use BSF_FUNCTION flag.  */
+		bool is_func = (bfd_target_elf_flavour == h->xvec->flavour) ?
+			symbol_table[i]->flags & BSF_FUNCTION : 1;
+
+		if (is_func && vma + symbol_table[i]->value > 0 &&
 		    symbol_table[i]->value < size)
 			symbol_count++;
 	}
@@ -342,6 +348,12 @@ addr2symbol(void *addr)
 	struct symbol key = {.addr = addr, .name = NULL, .end = NULL};
 	struct symbol *low = symbols;
 	struct symbol *high = symbols + symbol_count;
+
+    /* DEBUG */
+    (void) fprintf(stderr, "%p - %p [%p], ",
+        (void*)low->addr, (void*)symbols[symbol_count-1].addr,
+        addr);
+    (void) fputc('\n', stderr);
 
 	while (low + 1 < high) { /* there are at least two to choose from. */
 		struct symbol *middle = low + ((high - low) >> 1);
