@@ -3,9 +3,12 @@
 # Created to test for [Bug 920951]: server crashes on cat command
 #
 import os
+import sys
 import time
 import yaml
 from signal import SIGUSR1
+
+sys.stdout.push_filter("unable to read unknown load command 0x\d+", "")
 
 print """
 # Verify that the server starts from a pre-recorded snapshot.
