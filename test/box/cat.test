@@ -21,6 +21,7 @@ server.test_option("--cat=00000000000000000500.snap")
 
 # print "# Restore the default server..."
 os.unlink(snapshot)
+sys.stdout.pop_filter()
 
 # __EOF__
 
